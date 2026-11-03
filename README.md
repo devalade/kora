@@ -1,6 +1,6 @@
 # Kora
 
-Live: https://kora.devalade.workers.dev
+Live: https://kora.zecreator.com
 
 Kora is a Slack-style team chat app built with Void and TanStack Start on Cloudflare. It has
 workspaces, channels, direct messages, threads, reactions, file attachments, search, presence, and
