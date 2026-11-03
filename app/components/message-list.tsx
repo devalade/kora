@@ -272,13 +272,13 @@ function MessageRow({
         </div>
       </div>
 
-      <div className="message-actions absolute -top-3 right-2 flex items-center gap-0.5 rounded-[12px] border border-line/70 bg-paper p-1 shadow-[var(--kora-shadow-popover)]">
+      <div className="message-actions absolute -top-4 right-2 z-20 flex items-center gap-1 overflow-visible rounded-[14px] border border-line/70 bg-paper p-1.5 shadow-[var(--kora-shadow-popover)]">
         {QUICK_REACTIONS.map((emoji) => (
           <button
             key={emoji}
             type="button"
             onClick={() => onReact(message.id, emoji)}
-            className="grid size-7 place-items-center rounded-lg text-[15px] leading-none transition-[background-color,transform] duration-100 hover:bg-line-soft active:scale-[0.96]"
+            className="grid size-8 place-items-center overflow-visible rounded-[10px] text-[17px] leading-none transition-[background-color,transform] duration-100 hover:bg-line-soft active:scale-[0.96]"
             aria-label={`React with ${emoji}`}
           >
             {emoji}
@@ -288,7 +288,7 @@ function MessageRow({
         <button
           type="button"
           onClick={() => onReply(message)}
-          className="grid size-7 place-items-center rounded-lg text-muted transition-[background-color,color,transform] duration-100 hover:bg-line-soft hover:text-ink active:scale-[0.96]"
+          className="grid size-8 place-items-center rounded-[10px] text-muted transition-[background-color,color,transform] duration-100 hover:bg-line-soft hover:text-ink active:scale-[0.96]"
           aria-label="Reply in thread"
           title="Reply in thread"
         >

@@ -5,4 +5,7 @@ export default defineConfig({
     compatibility_date: '2026-02-24',
     compatibility_flags: ['nodejs_compat'],
   },
+  cloudflare: {
+    routes: [{ pattern: 'kora.zecreator.com', custom_domain: true }],
+  },
 });
