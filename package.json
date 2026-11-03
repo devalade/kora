@@ -1,0 +1,36 @@
+{
+  "name": "kora",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "void db generate",
+    "db:migrate": "void db migrate",
+    "db:seed": "void db seed",
+    "db:studio": "void db studio"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.117.1",
+    "@tanstack/react-start": "1.117.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.4",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "4.3.4",
+    "typescript": "^5.9.3",
+    "vite": "8.0.10",
+    "void": "1.1.11"
+  }
+}

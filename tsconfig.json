@@ -1,0 +1,18 @@
+{
+  "extends": "./.void/tsconfig.json",
+  "include": ["app/**/*", "db/**/*", "env.ts", "void.config.ts"],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler",
+    "module": "ESNext",
+    "target": "ES2022",
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["void/env", "vite/client"],
+    "paths": {
+      "@/*": ["./app/*"],
+      "@schema": ["./db/schema.ts"],
+      "@schema/*": ["./db/schema/*"]
+    }
+  }
+}
