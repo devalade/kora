@@ -18,6 +18,7 @@ import { Route as JoinCodeRouteImport } from './routes/join.$code'
 import { Route as ApiFilesIdRouteImport } from './routes/api.files.$id'
 import { Route as AppWorkspaceSlugIndexRouteImport } from './routes/app.$workspaceSlug.index'
 import { Route as AppWorkspaceSlugChannelIdRouteImport } from './routes/app.$workspaceSlug.$channelId'
+import { Route as AppWorkspaceSlugOfficeRouteImport } from './routes/app.$workspaceSlug.office'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -65,6 +66,11 @@ const AppWorkspaceSlugChannelIdRoute =
     path: '/app/$workspaceSlug/$channelId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AppWorkspaceSlugOfficeRoute = AppWorkspaceSlugOfficeRouteImport.update({
+  id: '/app/$workspaceSlug/office',
+  path: '/app/$workspaceSlug/office',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AppIndexRoute
   '/api/files/$id': typeof ApiFilesIdRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
+  '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
   '/app/$workspaceSlug/': typeof AppWorkspaceSlugIndexRoute
 }
 export interface FileRoutesByTo {
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   '/app': typeof AppIndexRoute
   '/api/files/$id': typeof ApiFilesIdRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
+  '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
   '/app/$workspaceSlug': typeof AppWorkspaceSlugIndexRoute
 }
 export interface FileRoutesById {
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   '/app/': typeof AppIndexRoute
   '/api/files/$id': typeof ApiFilesIdRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
+  '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
   '/app/$workspaceSlug/': typeof AppWorkspaceSlugIndexRoute
 }
 export interface FileRouteTypes {
@@ -111,6 +120,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/api/files/$id'
     | '/app/$workspaceSlug/$channelId'
+    | '/app/$workspaceSlug/office'
     | '/app/$workspaceSlug/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/api/files/$id'
     | '/app/$workspaceSlug/$channelId'
+    | '/app/$workspaceSlug/office'
     | '/app/$workspaceSlug'
   id:
     | '__root__'
@@ -133,6 +144,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/api/files/$id'
     | '/app/$workspaceSlug/$channelId'
+    | '/app/$workspaceSlug/office'
     | '/app/$workspaceSlug/'
   fileRoutesById: FileRoutesById
 }
@@ -145,6 +157,7 @@ export interface RootRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   ApiFilesIdRoute: typeof ApiFilesIdRoute
   AppWorkspaceSlugChannelIdRoute: typeof AppWorkspaceSlugChannelIdRoute
+  AppWorkspaceSlugOfficeRoute: typeof AppWorkspaceSlugOfficeRoute
   AppWorkspaceSlugIndexRoute: typeof AppWorkspaceSlugIndexRoute
 }
 
@@ -213,6 +226,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceSlugChannelIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/$workspaceSlug/office': {
+      id: '/app/$workspaceSlug/office'
+      path: '/app/$workspaceSlug/office'
+      fullPath: '/app/$workspaceSlug/office'
+      preLoaderRoute: typeof AppWorkspaceSlugOfficeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -225,6 +245,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   ApiFilesIdRoute: ApiFilesIdRoute,
   AppWorkspaceSlugChannelIdRoute: AppWorkspaceSlugChannelIdRoute,
+  AppWorkspaceSlugOfficeRoute: AppWorkspaceSlugOfficeRoute,
   AppWorkspaceSlugIndexRoute: AppWorkspaceSlugIndexRoute,
 }
 export const routeTree = rootRouteImport

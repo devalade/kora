@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Hash,
   LogOut,
+  Map as MapIcon,
   MessageSquarePlus,
   Plus,
   Search,
@@ -185,6 +186,16 @@ export function WorkspaceSidebar({
               <span className="flex-1">Search Kora</span>
               <kbd className="rounded border border-sidebar-line px-1 py-0.5 font-mono text-[9px]">⌘K</kbd>
             </button>
+            <Link
+              to="/app/$workspaceSlug/office"
+              params={{ workspaceSlug: snapshot.workspace.slug }}
+              onClick={onCloseMobile}
+              className="mt-2 flex h-9 w-full items-center gap-2 rounded-lg border border-mint-deep/20 bg-mint/25 px-2.5 text-left text-[12px] font-medium text-sidebar-bright transition hover:border-mint/50 hover:bg-mint/35"
+            >
+              <MapIcon size={14} />
+              <span className="flex-1">Studio</span>
+              <span className="size-1.5 rounded-full bg-mint" />
+            </Link>
           </div>
 
           <nav className="scroll-dark mt-4 flex-1 overflow-y-auto px-2 pb-3">

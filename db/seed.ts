@@ -49,7 +49,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     people.map((person, index) => ({
       ...person,
       passwordHash,
-      lastSeenAt: at(index * 3),
+      lastSeenAt: at(index * 0.2),
     })),
   );
 
@@ -291,5 +291,83 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     { messageId: 'm-4', userId: 'u-kwame', emoji: '🎉' },
     { messageId: 'm-12', userId: 'u-alade', emoji: '❤️' },
     { messageId: 'm-13', userId: 'u-amina', emoji: '🔥' },
+  ]);
+
+  await db.insert(schema.officePresence).values([
+    {
+      workspaceId: 'ws-kora',
+      userId: 'u-alade',
+      zone: 'floor',
+      x: 44,
+      y: 56,
+      activity: 'Building Kora',
+      status: 'available',
+      updatedAt: at(1),
+    },
+    {
+      workspaceId: 'ws-kora',
+      userId: 'u-amina',
+      zone: 'focus',
+      x: 17,
+      y: 24,
+      activity: 'Reviewing the new task flow',
+      status: 'focus',
+      updatedAt: at(4),
+    },
+    {
+      workspaceId: 'ws-kora',
+      userId: 'u-kwame',
+      zone: 'huddle',
+      x: 74,
+      y: 22,
+      activity: 'Huddle with Zane',
+      status: 'huddle',
+      updatedAt: at(7),
+    },
+    {
+      workspaceId: 'ws-kora',
+      userId: 'u-zane',
+      zone: 'lounge',
+      x: 18,
+      y: 78,
+      activity: 'Reviewing launch copy',
+      status: 'focus',
+      updatedAt: at(8),
+    },
+  ]);
+
+  await db.insert(schema.officeActivities).values([
+    {
+      id: 'oa-1',
+      workspaceId: 'ws-kora',
+      userId: 'u-alade',
+      kind: 'activity',
+      detail: 'Is now “Building Kora”',
+      createdAt: at(1),
+    },
+    {
+      id: 'oa-2',
+      workspaceId: 'ws-kora',
+      userId: 'u-amina',
+      kind: 'moved',
+      detail: 'Moved to the Focus room',
+      createdAt: at(4),
+    },
+    {
+      id: 'oa-3',
+      workspaceId: 'ws-kora',
+      userId: 'u-kwame',
+      kind: 'call',
+      detail: 'Joined the Studio huddle',
+      createdAt: at(7),
+    },
+    {
+      id: 'oa-4',
+      workspaceId: 'ws-kora',
+      userId: 'u-zane',
+      kind: 'moved',
+      detail: 'Moved to the Lounge',
+      createdAt: at(8),
+    },
   ]);
 });

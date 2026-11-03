@@ -535,7 +535,9 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
       : [];
 
     const visibleChannels = summaries.filter(
-      (channel) => channel.kind === 'public' || myChannelIds.has(channel.id),
+      (channel) =>
+        channel.kind !== 'studio' &&
+        (channel.kind === 'public' || myChannelIds.has(channel.id)),
     );
     const joinedChannels = visibleChannels.filter(
       (channel) => channel.kind !== 'dm' && myChannelIds.has(channel.id),
@@ -815,6 +817,7 @@ export const searchMessagesFn = createServerFn({ method: 'GET' })
       .where(
         and(
           eq(channels.workspaceId, data.workspaceId),
+          ne(channels.kind, 'studio'),
           isNull(messages.deletedAt),
           sql`lower(${messages.body}) like ${`%${data.query.toLowerCase()}%`}`,
         ),

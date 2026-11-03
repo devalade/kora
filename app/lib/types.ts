@@ -22,7 +22,7 @@ export type ChannelSummary = {
   id: string;
   name: string;
   topic: string;
-  kind: 'public' | 'private' | 'dm';
+  kind: 'public' | 'private' | 'dm' | 'studio';
   unread: number;
   memberCount: number;
   lastMessageAt: string | null;
@@ -108,4 +108,34 @@ export type SearchHit = {
 export type WorkspaceOverview = {
   me: UserSummary;
   workspaces: WorkspaceSummary[];
+};
+
+export type OfficeStatus = 'available' | 'focus' | 'away' | 'huddle';
+
+export type OfficePerson = {
+  user: UserSummary;
+  zone: string;
+  x: number;
+  y: number;
+  activity: string;
+  status: OfficeStatus;
+  updatedAt: string;
+  online: boolean;
+};
+
+export type OfficeActivity = {
+  id: string;
+  kind: string;
+  detail: string;
+  createdAt: string;
+  user: UserSummary;
+};
+
+export type OfficeSnapshot = {
+  workspace: WorkspaceSummary;
+  me: UserSummary;
+  people: OfficePerson[];
+  activities: OfficeActivity[];
+  studioChannelId: string | null;
+  call: CallView | null;
 };

@@ -213,3 +213,39 @@ export const callSignals = sqliteTable(
   },
   (table) => [index('call_signals_inbox_idx').on(table.callId, table.toUserId, table.createdAt)],
 );
+
+export const officePresence = sqliteTable(
+  'office_presence',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    zone: text('zone').notNull().default('floor'),
+    x: integer('x').notNull().default(50),
+    y: integer('y').notNull().default(55),
+    activity: text('activity').notNull().default(''),
+    status: text('status').notNull().default('available'),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.userId] })],
+);
+
+export const officeActivities = sqliteTable(
+  'office_activities',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    detail: text('detail').notNull(),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [index('office_activities_workspace_idx').on(table.workspaceId, table.createdAt)],
+);
