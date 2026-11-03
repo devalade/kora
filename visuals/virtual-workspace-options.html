@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kora · Virtual workspace directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #fffdf9;
+    --canvas: #f7f4ee;
+    --ink: #171a1a;
+    --ink-soft: #2a2f2e;
+    --muted: #736f66;
+    --faint: #a19b8f;
+    --line: #e7e1d5;
+    --line-soft: #f0ebe2;
+    --sidebar: #151b19;
+    --sidebar-raised: #1d2523;
+    --sidebar-line: #2b3431;
+    --sidebar-text: #a8b1ac;
+    --sidebar-bright: #f2f0ea;
+    --coral: #ef5f3e;
+    --coral-deep: #d84a2b;
+    --coral-soft: #fde7e0;
+    --mint: #bfe4d2;
+    --mint-deep: #17795f;
+    --sage: #e3e9df;
+    --gold: #e8b34a;
+    --shadow: 0 0 0 1px oklch(0 0 0 / 0.05), 0 18px 50px -28px oklch(0 0 0 / 0.3);
+    --shadow-soft: 0 0 0 1px oklch(0 0 0 / 0.045), 0 8px 24px -18px oklch(0 0 0 / 0.2);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(ellipse 70% 45% at 50% -10%, rgba(191, 228, 210, 0.55), transparent 70%),
+      var(--canvas);
+    color: var(--ink);
+    font-family: "Instrument Sans", system-ui, sans-serif;
+  }
+  .page { max-width: 1420px; margin: 0 auto; padding: 46px 36px 60px; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--coral-deep); font-weight: 700;
+  }
+  .kicker span { width: 22px; height: 1px; background: var(--coral); }
+  h1 {
+    margin: 14px 0 0; max-width: 880px;
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 58px; line-height: .96; letter-spacing: -.02em; font-weight: 400;
+  }
+  h1 em { color: var(--coral); }
+  .lede { margin: 16px 0 0; max-width: 660px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 36px; }
+  .option {
+    background: rgba(255, 253, 249, .72); border: 1px solid rgba(231, 225, 213, .9);
+    border-radius: 30px; padding: 12px 12px 18px; box-shadow: var(--shadow);
+    min-width: 0;
+  }
+  .option-head { padding: 12px 16px 14px; }
+  .option-head .tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .option-head .tag b { color: var(--ink); }
+  .option-head h2 { margin: 7px 0 0; font-size: 22px; letter-spacing: -.03em; }
+  .option-head p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+  .option-foot {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 12px 16px 0; color: var(--muted); font-size: 11px; line-height: 1.55;
+  }
+  .option-foot b { color: var(--ink); font-weight: 600; }
+  .app {
+    position: relative; display: flex; height: 478px; overflow: hidden;
+    border-radius: 20px; background: var(--canvas);
+    border: 1px solid var(--line); box-shadow: 0 1px 0 rgba(23,26,26,.03);
+  }
+  .rail {
+    width: 48px; flex: 0 0 48px; background: var(--sidebar);
+    display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 10px 0;
+  }
+  .rail .mark { width: 30px; height: 30px; margin-bottom: 8px; }
+  .rail .ico {
+    width: 30px; height: 30px; border-radius: 9px; color: var(--sidebar-text);
+    display: grid; place-items: center;
+  }
+  .rail .ico.active { background: rgba(255,255,255,.12); color: white; }
+  .rail .spacer { flex: 1; }
+  .side {
+    width: 132px; flex: 0 0 132px; background: var(--sidebar-raised);
+    padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; color: var(--sidebar-text);
+    min-width: 0;
+  }
+  .ws-name { color: var(--sidebar-bright); font-size: 11px; font-weight: 600; padding: 2px 6px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side .label { padding: 8px 6px 4px; font-size: 7px; letter-spacing: .16em; text-transform: uppercase; color: rgba(168,177,172,.7); }
+  .side .row {
+    display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px;
+    border-radius: 6px; font-size: 9px; white-space: nowrap; overflow: hidden;
+  }
+  .side .row.active { background: rgba(255,255,255,.11); color: white; }
+  .side .row .hash { opacity: .65; font-size: 10px; }
+  .side .pill { margin-left: auto; background: var(--coral); color: white; border-radius: 999px; padding: 1px 5px; font-size: 7px; font-weight: 700; }
+  .side .me { margin-top: auto; display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px; border-top: 1px solid var(--sidebar-line); }
+  .side .me .name { color: var(--sidebar-bright); font-size: 8px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--canvas); }
+  .topbar {
+    height: 42px; flex: 0 0 42px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; border-bottom: 1px solid var(--line); background: rgba(255,253,249,.86);
+  }
+  .topbar .title { font-size: 11px; font-weight: 600; }
+  .topbar .sub { font-size: 8px; color: var(--muted); margin-top: 1px; }
+  .topbar .spacer { flex: 1; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+    border-radius: 7px; border: 1px solid var(--line); background: var(--paper);
+    font-size: 8px; font-weight: 600; color: var(--ink-soft); white-space: nowrap;
+  }
+  .chip.live { background: rgba(191,228,210,.45); border-color: rgba(23,121,95,.2); color: var(--mint-deep); }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--mint-deep); display: inline-block; }
+  .dot.coral { background: var(--coral); }
+  .dot.gold { background: var(--gold); }
+  .dot.muted { background: var(--faint); }
+  .room { flex: 1; position: relative; min-height: 0; overflow: hidden; background: #f9f6f0; }
+  .room-grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(23,26,26,.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(23,26,26,.035) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .zone {
+    position: absolute; border: 1px dashed rgba(23,26,26,.16); border-radius: 14px;
+    background: rgba(255,253,249,.45);
+  }
+  .zone .zone-label {
+    position: absolute; top: 7px; left: 9px; font-size: 7px; font-weight: 700;
+    letter-spacing: .12em; text-transform: uppercase; color: rgba(115,111,102,.75);
+  }
+  .desk {
+    position: absolute; width: 34px; height: 16px; border-radius: 5px;
+    background: #efe9df; border: 1px solid rgba(23,26,26,.08);
+    box-shadow: 0 1px 0 rgba(255,255,255,.8) inset;
+  }
+  .desk::before, .desk::after {
+    content: ""; position: absolute; top: 50%; width: 5px; height: 5px; border-radius: 50%;
+    background: #d9d1c4; transform: translateY(-50%);
+  }
+  .desk::before { left: -6px; } .desk::after { right: -6px; }
+  .rug {
+    position: absolute; border-radius: 16px; background: rgba(191,228,210,.22);
+    border: 1px solid rgba(23,121,95,.1);
+  }
+  .sofa {
+    position: absolute; width: 54px; height: 20px; border-radius: 8px;
+    background: #dce7df; border: 1px solid rgba(23,121,95,.12);
+    box-shadow: 0 2px 4px -2px rgba(23,26,26,.2);
+  }
+  .sofa::before, .sofa::after {
+    content: ""; position: absolute; top: 2px; bottom: 2px; width: 3px; border-radius: 2px;
+    background: rgba(23,121,95,.16);
+  }
+  .sofa::before { left: 3px; } .sofa::after { right: 3px; }
+  .plant { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #b8d4b3; box-shadow: 0 0 0 3px rgba(184,212,179,.22); }
+  .avatar-spot { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 4px; z-index: 4; }
+  .avatar-spot .tag-name {
+    padding: 2px 6px; border-radius: 999px; background: rgba(255,253,249,.9);
+    border: 1px solid rgba(231,225,213,.9); font-size: 7px; font-weight: 600; color: var(--ink-soft);
+    box-shadow: 0 2px 5px -3px rgba(23,26,26,.35); white-space: nowrap;
+  }
+  .avatar-spot.you .tag-name { background: var(--ink); color: white; border-color: var(--ink); }
+  .halo {
+    position: absolute; transform: translate(-50%, -50%); width: 120px; height: 120px;
+    border-radius: 50%; border: 1px dashed rgba(239,95,62,.45); background: rgba(239,95,62,.04);
+    z-index: 2;
+  }
+  .halo::after {
+    content: "nearby"; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    font-size: 6px; letter-spacing: .12em; text-transform: uppercase; color: rgba(216,74,43,.7);
+  }
+  .nearby-pill {
+    position: absolute; z-index: 7; display: flex; align-items: center; gap: 6px;
+    padding: 7px 9px 7px 7px; border-radius: 12px; background: var(--paper);
+    border: 1px solid rgba(23,121,95,.17); box-shadow: 0 8px 20px -12px rgba(23,26,26,.4);
+  }
+  .nearby-pill .txt { font-size: 7px; line-height: 1.25; color: var(--muted); }
+  .nearby-pill .txt b { display: block; color: var(--ink); font-size: 8px; }
+  .nearby-pill button {
+    border: 0; background: var(--mint-deep); color: white; border-radius: 7px;
+    font: 600 7px "Instrument Sans"; padding: 4px 7px; margin-left: 2px;
+  }
+  .room-foot {
+    position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 8;
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+    border-radius: 11px; background: rgba(21,27,25,.92); color: rgba(255,255,255,.7);
+    box-shadow: 0 10px 24px -16px rgba(21,27,25,.8);
+  }
+  .room-foot .hint { font-size: 7px; }
+  .room-foot .spacer { flex: 1; }
+  .room-foot .call { display: flex; align-items: center; gap: 5px; color: #a8e5cd; font-size: 7px; font-weight: 600; }
+  .room-foot .call .pulse { width: 5px; height: 5px; border-radius: 50%; background: #7be0b8; box-shadow: 0 0 0 3px rgba(123,224,184,.15); }
+  .board { flex: 1; min-width: 0; background: var(--canvas); padding: 10px; overflow: hidden; }
+  .board-grid { display: grid; grid-template-columns: 1.15fr .95fr .95fr; gap: 8px; }
+  .widget {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 9px;
+    box-shadow: 0 1px 0 rgba(23,26,26,.025); min-width: 0;
+  }
+  .widget-head { display: flex; align-items: center; gap: 5px; margin-bottom: 7px; }
+  .widget-head .w-title { font-size: 8px; font-weight: 600; }
+  .widget-head .w-count { font-size: 7px; color: var(--faint); margin-left: auto; }
+  .widget-head .w-ico { width: 15px; height: 15px; border-radius: 5px; background: var(--coral-soft); color: var(--coral-deep); display: grid; place-items: center; }
+  .task-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-top: 1px solid var(--line-soft); }
+  .task-row:first-of-type { border-top: 0; }
+  .task-row .status { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--faint); flex: 0 0 10px; }
+  .task-row .status.progress { border-color: var(--gold); }
+  .task-row .status.done { border-color: var(--mint-deep); background: var(--mint); }
+  .task-row .t { min-width: 0; flex: 1; font-size: 7.5px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .task-row .t b, .task-row .t small { display: block; font-size: 6.5px; font-weight: 500; color: var(--faint); }
+  .task-row .pri { font-size: 7px; color: var(--coral-deep); }
+  .sticky-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .sticky {
+    min-height: 46px; padding: 6px; border-radius: 7px; font-size: 7px; line-height: 1.35;
+    color: var(--ink-soft); box-shadow: 0 3px 8px -5px rgba(23,26,26,.3);
+  }
+  .sticky.s1 { background: #f7e6b8; transform: rotate(-1.1deg); }
+  .sticky.s2 { background: #d7eadf; transform: rotate(.8deg); }
+  .sticky.s3 { background: #f7d9cf; transform: rotate(-.4deg); }
+  .sticky b { display: block; font-size: 6px; letter-spacing: .1em; text-transform: uppercase; color: rgba(23,26,26,.45); margin-bottom: 3px; }
+  .huddle-card { background: linear-gradient(145deg, #1d2523, #141a18); color: white; border: 0; }
+  .huddle-card .widget-head .w-title { color: white; }
+  .huddle-card .widget-head .w-count { color: rgba(255,255,255,.5); }
+  .huddle-faces { display: flex; gap: 4px; margin: 8px 0 6px; }
+  .huddle-faces .face { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 6px; font-weight: 700; color: white; box-shadow: 0 0 0 1.5px rgba(255,255,255,.16); }
+  .huddle-time { font-family: ui-monospace, monospace; font-size: 7px; color: rgba(255,255,255,.55); }
+  .huddle-actions { display: flex; gap: 4px; margin-top: 7px; }
+  .huddle-actions span { width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.1); display: grid; place-items: center; color: rgba(255,255,255,.7); }
+  .huddle-actions span.leave { background: var(--coral); color: white; margin-left: auto; }
+  .activity-row { display: flex; align-items: flex-start; gap: 5px; padding: 5px 0; border-top: 1px solid var(--line-soft); font-size: 7px; color: var(--muted); line-height: 1.35; }
+  .activity-row:first-of-type { border-top: 0; }
+  .activity-row b { color: var(--ink); font-weight: 600; }
+  .activity-row .when { color: var(--faint); font-size: 6px; margin-left: auto; white-space: nowrap; }
+  .doc-row { display: flex; align-items: center; gap: 5px; padding: 5px 0; border-top: 1px solid var(--line-soft); font-size: 7px; color: var(--ink-soft); }
+  .doc-row:first-of-type { border-top: 0; }
+  .doc-row span { color: var(--faint); font-size: 6px; margin-left: auto; }
+  .app-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 7px; }
+  .app-tile { aspect-ratio: 1; border-radius: 7px; background: var(--canvas); border: 1px solid var(--line-soft); display: grid; place-items: center; color: var(--muted); font-size: 6px; }
+  .app-tile.coral { background: var(--coral-soft); color: var(--coral-deep); border-color: rgba(239,95,62,.15); }
+  .board-footer { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 2px 0; color: var(--faint); font-size: 7px; }
+  .board-footer .avatars { display: flex; }
+  .board-footer .avatars .mini { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--paper); margin-left: -4px; display: grid; place-items: center; font-size: 5px; font-weight: 700; color: white; }
+  .board-footer .avatars .mini:first-child { margin-left: 0; }
+  .board-footer .spacer { flex: 1; }
+  .recommend {
+    margin-top: 18px; display: flex; align-items: center; gap: 14px;
+    padding: 16px 20px; border-radius: 18px; border: 1px solid rgba(23,121,95,.16);
+    background: rgba(191,228,210,.3);
+  }
+  .recommend .badge { width: 30px; height: 30px; border-radius: 10px; background: var(--mint-deep); color: white; display: grid; place-items: center; flex: 0 0 30px; }
+  .recommend p { margin: 0; font-size: 11px; line-height: 1.55; color: var(--muted); }
+  .recommend b { color: var(--ink); }
+  .recommend .spacer { flex: 1; }
+  .recommend .pill { border: 1px solid rgba(23,121,95,.25); color: var(--mint-deep); border-radius: 999px; padding: 6px 10px; font-size: 9px; font-weight: 600; white-space: nowrap; }
+  .footer { margin-top: 26px; display: flex; justify-content: space-between; color: var(--faint); font-size: 9px; letter-spacing: .02em; }
+  .avatar {
+    display: grid; place-items: center; border-radius: 50%; font-weight: 700; color: #fff;
+    box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px rgba(23,26,26,.06);
+    flex: 0 0 auto;
+  }
+  .avatar.a1 { background: #d9a9a0; color: #6e2f27; }
+  .avatar.a2 { background: #b7d3e8; color: #25536e; }
+  .avatar.a3 { background: #bfe0c9; color: #256844; }
+  .avatar.a4 { background: #e3c8a9; color: #6b4a26; }
+  .avatar.a5 { background: #d5c6e8; color: #4f3b6b; }
+  .avatar.you { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--coral); }
+  .avatar span { line-height: 1; }
+  .badge-ico { width: 12px; height: 12px; display: inline-grid; place-items: center; }
+  svg {
+    display: block; width: 12px; height: 12px; fill: none;
+    stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .ico svg, .chip svg, .room-foot svg, .huddle-actions svg, .recommend svg, .widget-head svg { width: 11px; height: 11px; }
+  .rail .ico svg { width: 13px; height: 13px; }
+  @media (max-width: 980px) {
+    .page { padding: 30px 18px 40px; }
+    h1 { font-size: 42px; }
+    .options { grid-template-columns: 1fr; }
+    .app { height: 430px; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c1 .3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><path d="m23 7-7 5 7 5V7Z"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15M15 6v15"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-cmd" viewBox="0 0 24 24"><path d="M9 6a3 3 0 1 0-3 3h3V6ZM9 18a3 3 0 1 1-3-3h3v3ZM15 6a3 3 0 1 1 3 3h-3V6ZM15 18a3 3 0 1 0 3-3h-3v3Z"/><path d="M9 9h6v6H9z"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.8-.9.8-2.2-.1-3-1-.9-2.2-.8-2.9 0Z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.9A12.8 12.8 0 0 1 22 2c0 2.9-.8 7.5-6 11a22 22 0 0 1-4 2Z"/><path d="M9 12H4s.5-3 2-4c1.7-1.1 5 0 5 0M12 15v5s3-.5 4-2c1.1-1.7 0-5 0-5"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="kicker"><span></span> Kora · virtual workspace directions</div>
+  <h1>Two ways to make the room <em>feel alive.</em></h1>
+  <p class="lede">Both keep the same Kora shell, channels, and huddles. They differ in what the workspace itself becomes: a place you move through, or a board you work from.</p>
+
+  <div class="options">
+    <section class="option">
+      <div class="option-head">
+        <div class="tag"><b>Option A</b> · spatial</div>
+        <h2>Virtual office</h2>
+        <p>Move around a soft floor plan. People are where they are. Walk close to talk, or pull someone into a huddle.</p>
+      </div>
+      <div class="app">
+        <div class="rail">
+          <svg class="mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect width="40" height="40" rx="13" fill="#EF5F3E"/><path d="M12 11.5v17M12 20.2l8.2-8.7M12 20.2l8.6 8.3" stroke="#FFF9F3" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M26.5 14.2c2.4 0 4 1.6 4 4.2v7.2c0 2.5-1.6 4.1-4 4.1" stroke="#FFF9F3" stroke-width="3.4" stroke-linecap="round"/><circle cx="27" cy="20.2" r="1.7" fill="#151B19"/></svg>
+          <div class="ico active"><svg><use href="#i-map"/></svg></div>
+          <div class="ico"><svg><use href="#i-search"/></svg></div>
+          <div class="ico"><svg><use href="#i-message"/></svg></div>
+          <div class="ico"><svg><use href="#i-users"/></svg></div>
+          <div class="spacer"></div>
+          <div class="avatar a1" style="width:24px;height:24px;font-size:7px"><span>AY</span></div>
+        </div>
+        <div class="side">
+          <div class="ws-name">Kora Studio</div>
+          <div class="label">Channels</div>
+          <div class="row"><span class="hash">#</span> general</div>
+          <div class="row active"><svg width="9" height="9"><use href="#i-map"/></svg> Studio <span class="pill">4</span></div>
+          <div class="row"><span class="hash">#</span> product <span class="pill">2</span></div>
+          <div class="row"><span class="hash">#</span> design</div>
+          <div class="row"><span class="hash">#</span> random</div>
+          <div class="label">Direct messages</div>
+          <div class="row"><span class="avatar a2" style="width:14px;height:14px;font-size:5px"><span>AD</span></span> Amina</div>
+          <div class="row"><span class="avatar a3" style="width:14px;height:14px;font-size:5px"><span>KM</span></span> Kwame</div>
+          <div class="me">
+            <span class="avatar a1 you" style="width:20px;height:20px;font-size:6px"><span>AY</span></span>
+            <span class="name">Alade</span>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div>
+              <div class="title">Studio</div>
+              <div class="sub">The room is live · 4 people here</div>
+            </div>
+            <div class="spacer"></div>
+            <span class="chip live"><span class="dot"></span> 2 in a huddle</span>
+            <span class="chip"><svg><use href="#i-video"/></svg> Join</span>
+          </div>
+          <div class="room">
+            <div class="room-grid"></div>
+            <div class="zone" style="left:8%;top:7%;width:36%;height:39%"><span class="zone-label">Focus pods</span>
+              <div class="desk" style="left:14%;top:34%"></div><div class="desk" style="left:14%;top:58%"></div>
+              <div class="desk" style="left:48%;top:34%"></div><div class="desk" style="left:48%;top:58%"></div>
+              <div class="plant" style="left:84%;top:18%"></div>
+            </div>
+            <div class="zone" style="right:8%;top:7%;width:36%;height:39%"><span class="zone-label">Huddle rooms</span>
+              <div class="sofa" style="left:18%;top:50%"></div>
+              <div class="sofa" style="right:18%;top:50%"></div>
+              <div class="plant" style="left:50%;top:24%"></div>
+            </div>
+            <div class="zone" style="left:8%;bottom:13%;width:50%;height:34%"><span class="zone-label">Lounge</span>
+              <div class="rug" style="left:14%;top:32%;width:46%;height:40%"></div>
+              <div class="sofa" style="left:22%;top:44%"></div>
+              <div class="sofa" style="right:18%;top:44%"></div>
+              <div class="plant" style="left:82%;top:18%"></div>
+            </div>
+            <div class="zone" style="right:8%;bottom:13%;width:20%;height:34%"><span class="zone-label">Kitchen</span>
+              <div class="plant" style="left:30%;top:35%"></div>
+              <div class="desk" style="left:25%;top:64%;width:44px"></div>
+            </div>
+
+            <div class="halo" style="left:45%;top:62%"></div>
+            <div class="avatar-spot" style="left:45%;top:62%">
+              <span class="avatar a1 you" style="width:26px;height:26px;font-size:8px"><span>AY</span></span>
+              <span class="tag-name">You · Design</span>
+            </div>
+            <div class="avatar-spot" style="left:56%;top:52%">
+              <span class="avatar a2" style="width:24px;height:24px;font-size:7px"><span>AD</span></span>
+              <span class="tag-name">Amina</span>
+            </div>
+            <div class="avatar-spot" style="left:75%;top:29%">
+              <span class="avatar a3" style="width:24px;height:24px;font-size:7px"><span>KM</span></span>
+              <span class="tag-name">Kwame · huddle</span>
+            </div>
+            <div class="avatar-spot" style="left:64%;top:24%">
+              <span class="avatar a4" style="width:22px;height:22px;font-size:6px"><span>ZM</span></span>
+              <span class="tag-name">Zane</span>
+            </div>
+            <div class="avatar-spot" style="left:26%;top:38%">
+              <span class="avatar a5" style="width:22px;height:22px;font-size:6px"><span>PR</span></span>
+              <span class="tag-name">Priya</span>
+            </div>
+
+            <div class="nearby-pill" style="left:50%;top:45%">
+              <span class="avatar a2" style="width:19px;height:19px;font-size:6px"><span>AD</span></span>
+              <span class="txt"><b>Amina is nearby</b>Say hi or start a huddle</span>
+              <button>Huddle</button>
+            </div>
+
+            <div class="room-foot">
+              <svg><use href="#i-cmd"/></svg><span class="hint">WASD or drag to move</span>
+              <span class="spacer"></span>
+              <span class="call"><span class="pulse"></span> Studio huddle · 04:12</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-foot"><b>Best for</b> remote teams who miss the accidental moments: walking past a conversation, joining a room, seeing who is around.</div>
+    </section>
+
+    <section class="option">
+      <div class="option-head">
+        <div class="tag"><b>Option B</b> · modular</div>
+        <h2>Shared workspace</h2>
+        <p>A board that pulls the work into one place: tasks, docs, huddles, activity, and a shared canvas.</p>
+      </div>
+      <div class="app">
+        <div class="rail">
+          <svg class="mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect width="40" height="40" rx="13" fill="#EF5F3E"/><path d="M12 11.5v17M12 20.2l8.2-8.7M12 20.2l8.6 8.3" stroke="#FFF9F3" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M26.5 14.2c2.4 0 4 1.6 4 4.2v7.2c0 2.5-1.6 4.1-4 4.1" stroke="#FFF9F3" stroke-width="3.4" stroke-linecap="round"/><circle cx="27" cy="20.2" r="1.7" fill="#151B19"/></svg>
+          <div class="ico active"><svg><use href="#i-grid"/></svg></div>
+          <div class="ico"><svg><use href="#i-search"/></svg></div>
+          <div class="ico"><svg><use href="#i-message"/></svg></div>
+          <div class="ico"><svg><use href="#i-users"/></svg></div>
+          <div class="spacer"></div>
+          <div class="avatar a1" style="width:24px;height:24px;font-size:7px"><span>AY</span></div>
+        </div>
+        <div class="side">
+          <div class="ws-name">Kora Studio</div>
+          <div class="label">Workspace</div>
+          <div class="row active"><svg width="9" height="9"><use href="#i-grid"/></svg> Overview</div>
+          <div class="row"><svg width="9" height="9"><use href="#i-check"/></svg> Tasks <span class="pill">12</span></div>
+          <div class="row"><svg width="9" height="9"><use href="#i-file"/></svg> Docs</div>
+          <div class="row"><svg width="9" height="9"><use href="#i-activity"/></svg> Activity</div>
+          <div class="label">Channels</div>
+          <div class="row"><span class="hash">#</span> general</div>
+          <div class="row"><span class="hash">#</span> product</div>
+          <div class="me">
+            <span class="avatar a1 you" style="width:20px;height:20px;font-size:6px"><span>AY</span></span>
+            <span class="name">Alade</span>
+          </div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div>
+              <div class="title">Overview</div>
+              <div class="sub">Everything the team is moving today</div>
+            </div>
+            <div class="spacer"></div>
+            <span class="chip"><svg><use href="#i-search"/></svg> Search</span>
+            <span class="chip"><svg><use href="#i-plus"/></svg> New</span>
+          </div>
+          <div class="board">
+            <div class="board-grid">
+              <div class="widget" style="grid-row: span 2">
+                <div class="widget-head"><span class="w-ico"><svg><use href="#i-check"/></svg></span><span class="w-title">My tasks</span><span class="w-count">6 open</span></div>
+                <div class="task-row"><span class="status progress"></span><span class="t">Finish the Kora domain<small>Kora · QUA-241</small></span><span class="pri">↑</span></div>
+                <div class="task-row"><span class="status"></span><span class="t">Call overlay on mobile<small>Kora · QUA-238</small></span><span class="pri">↑</span></div>
+                <div class="task-row"><span class="status done"></span><span class="t">Upload progress states<small>Kora · QUA-236</small></span><span class="pri" style="color:var(--mint-deep)">✓</span></div>
+                <div class="task-row"><span class="status"></span><span class="t">Virtual office spec<small>Kora · QUA-233</small></span><span class="pri">·</span></div>
+                <div class="task-row"><span class="status progress"></span><span class="t">Repo agent permissions<small>Kora · QUA-230</small></span><span class="pri">↑</span></div>
+                <div class="task-row"><span class="status done"></span><span class="t">Premium avatar pass<small>Kora · QUA-228</small></span><span class="pri" style="color:var(--mint-deep)">✓</span></div>
+                <div class="board-footer"><div class="avatars"><span class="mini a1">AY</span><span class="mini a2">AD</span><span class="mini a3">KM</span></div><span>3 people in the workspace</span><span class="spacer"></span><span>Open tasks →</span></div>
+              </div>
+              <div class="widget">
+                <div class="widget-head"><span class="w-ico" style="background:#e8e3f7;color:#5b4a8a"><svg><use href="#i-doc"/></svg></span><span class="w-title">Canvas</span><span class="w-count">edited now</span></div>
+                <div class="sticky-grid">
+                  <div class="sticky s1"><b>Ship</b>Kora on zecreator.com</div>
+                  <div class="sticky s2"><b>Next</b>Proximity huddles</div>
+                  <div class="sticky s3"><b>Idea</b>Agent picks up a repo issue</div>
+                  <div class="sticky s2" style="transform:rotate(1.2deg)"><b>Note</b>Keep the room quiet</div>
+                </div>
+              </div>
+              <div class="widget huddle-card">
+                <div class="widget-head"><span class="w-ico" style="background:rgba(191,228,210,.16);color:#9fe4c8"><svg><use href="#i-video"/></svg></span><span class="w-title">Huddle live</span><span class="w-count">04:12</span></div>
+                <div class="huddle-faces"><span class="face a2">AD</span><span class="face a3">KM</span><span class="face a4">ZM</span></div>
+                <div class="huddle-time">Studio · 3 in the room</div>
+                <div class="huddle-actions"><span><svg><use href="#i-mic"/></svg></span><span><svg><use href="#i-video"/></svg></span><span class="leave"><svg><use href="#i-phone"/></svg></span></div>
+              </div>
+              <div class="widget">
+                <div class="widget-head"><span class="w-ico" style="background:#e3e9df;color:#3e5e3f"><svg><use href="#i-activity"/></svg></span><span class="w-title">Activity</span><span class="w-count">now</span></div>
+                <div class="activity-row"><span><b>Amina</b> moved a task to In review</span><span class="when">2m</span></div>
+                <div class="activity-row"><span><b>Kwame</b> commented on QUA-238</span><span class="when">9m</span></div>
+                <div class="activity-row"><span><b>Zane</b> shared a doc</span><span class="when">14m</span></div>
+              </div>
+              <div class="widget">
+                <div class="widget-head"><span class="w-ico" style="background:#f7ecd2;color:#8a6119"><svg><use href="#i-file"/></svg></span><span class="w-title">Pages</span><span class="w-count">8</span></div>
+                <div class="doc-row"><svg width="10" height="10"><use href="#i-file"/></svg> Q4 launch plan <span>today</span></div>
+                <div class="doc-row"><svg width="10" height="10"><use href="#i-file"/></svg> Virtual office spec <span>2d</span></div>
+                <div class="doc-row"><svg width="10" height="10"><use href="#i-file"/></svg> Agent permissions <span>4d</span></div>
+                <div class="app-tiles">
+                  <div class="app-tile coral"><svg><use href="#i-message"/></svg></div>
+                  <div class="app-tile"><svg><use href="#i-rocket"/></svg></div>
+                  <div class="app-tile"><svg><use href="#i-check"/></svg></div>
+                  <div class="app-tile"><svg><use href="#i-video"/></svg></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-foot"><b>Best for</b> teams who want one calm surface for the day's work, with tasks and docs visible without opening five tabs.</div>
+    </section>
+  </div>
+
+  <div class="recommend">
+    <span class="badge"><svg width="16" height="16"><use href="#i-rocket"/></svg></span>
+    <p><b>My recommendation:</b> build the spatial office as the signature, then let the shared workspace be the board inside it. Start with presence, movement, and click-to-huddle; add tasks and repo agents after.</p>
+    <span class="spacer"></span>
+    <span class="pill">A first, B next</span>
+  </div>
+
+  <div class="footer"><span>Kora · visual direction · 03 Nov 2026</span><span>Same shell, same huddles, two ways to feel present.</span></div>
+</div>
+</body>
+</html>
