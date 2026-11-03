@@ -98,8 +98,16 @@ WebRTC offer, the other side answers, and ICE candidates are exchanged through D
 flow directly between browsers.
 
 The default configuration uses Cloudflare and Google STUN servers. A production deployment behind
-restrictive NATs should add a TURN service. Add its URL and credentials to `ICE_SERVERS` in
-`app/components/call-room.tsx`.
+restrictive NATs should add a TURN service. Put its credentials in the environment and the call room
+will include them automatically:
+
+```bash
+VITE_TURN_URL=turn:turn.example.com:3478
+VITE_TURN_USERNAME=...
+VITE_TURN_CREDENTIAL=...
+```
+
+Set those keys in your shell or in the deployment environment before building.
 
 Polling is deliberate. Void typed WebSocket routes are not available in meta-framework mode, so the
 app uses server functions and cheap polling to stay compatible with TanStack Start. The seams are

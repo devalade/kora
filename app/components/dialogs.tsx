@@ -1,4 +1,3 @@
-import { useNavigate } from '@tanstack/react-router';
 import {
   Check,
   Copy,
@@ -8,9 +7,8 @@ import {
   MessageSquare,
   Plus,
   Search,
-  UserPlus,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
   createChannelFn,

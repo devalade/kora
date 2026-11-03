@@ -20,7 +20,7 @@ import {
   workspaceSnapshotFn,
 } from '../lib/chat';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
-import { joinCallFn, leaveCallFn } from '../lib/calls';
+import { joinCallFn } from '../lib/calls';
 import type { MessageView, WorkspaceSnapshot } from '../lib/types';
 import { Avatar, AvatarStack } from '../components/avatar';
 import { CallRoom } from '../components/call-room';
@@ -37,7 +37,7 @@ import { MessageComposer } from '../components/message-composer';
 import { MessageList } from '../components/message-list';
 import { ThreadPanel } from '../components/thread-panel';
 import { WorkspaceSidebar } from '../components/workspace-sidebar';
-import { clockTime, relativeTime } from '../lib/format';
+import { relativeTime } from '../lib/format';
 import { cn } from '../utils/cn';
 
 export const Route = createFileRoute('/app/$workspaceSlug/$channelId')({
@@ -260,14 +260,7 @@ function WorkspacePage() {
   }
 
   async function leaveHuddle() {
-    if (!snapshot.call) return;
-    const callId = snapshot.call.id;
     setCallOpen(false);
-    try {
-      await leaveCallFn({ data: { callId } });
-    } catch {
-      // Closing the local room is enough if the server call already ended.
-    }
     await load();
   }
 
@@ -396,15 +389,17 @@ function WorkspacePage() {
             <HeaderButton label="Channel details" onClick={() => setDetailsOpen(true)}>
               <Info size={17} />
             </HeaderButton>
-            <HeaderButton
-              label="Members"
-              onClick={() => {
-                setMembersOpen((open) => !open);
-                setThreadId(null);
-              }}
-            >
-              <Users size={17} />
-            </HeaderButton>
+            <div className="hidden md:block">
+              <HeaderButton
+                label="Members"
+                onClick={() => {
+                  setMembersOpen((open) => !open);
+                  setThreadId(null);
+                }}
+              >
+                <Users size={17} />
+              </HeaderButton>
+            </div>
           </div>
         </header>
 

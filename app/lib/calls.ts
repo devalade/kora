@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
 import { and, db, eq, gt, inArray, isNull } from 'void/db';
-import { callParticipants, callSignals, calls, channelMembers } from '@schema';
+import { callParticipants, callSignals, calls } from '@schema';
 import { z } from 'zod';
 import { requireChannel, requireUser } from './server';
 import { newId } from './ids';

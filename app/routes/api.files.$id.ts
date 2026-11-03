@@ -6,7 +6,7 @@ import { attachmentForUser } from '../lib/attachments';
 export const Route = createFileRoute('/api/files/$id')({
   server: {
     handlers: {
-      GET: async ({ request, params }) => {
+      GET: async ({ params }) => {
         const me = await readSessionUser();
         if (!me) return new Response('Sign in required.', { status: 401 });
         const row = await attachmentForUser(params.id, me.id);

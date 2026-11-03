@@ -38,7 +38,6 @@ import type {
   UserSummary,
   WorkspaceOverview,
   WorkspaceSnapshot,
-  WorkspaceSummary,
 } from './types';
 
 const LIVE_WINDOW_MS = 75_000;

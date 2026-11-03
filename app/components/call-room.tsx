@@ -21,9 +21,16 @@ type Peer = {
   pending: RTCIceCandidateInit[];
 };
 
+const TURN_URL = import.meta.env.VITE_TURN_URL as string | undefined;
+const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME as string | undefined;
+const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined;
+
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:stun.l.google.com:19302' },
+  ...(TURN_URL
+    ? [{ urls: TURN_URL, username: TURN_USERNAME, credential: TURN_CREDENTIAL }]
+    : []),
 ];
 
 export function CallRoom({
@@ -326,7 +333,7 @@ export function CallRoom({
     try {
       await leaveCallFn({ data: { callId: call.id } });
     } catch {
-      // Leaving locally matters more than the bookkeeping call.
+      // The local room closes even if the server call already ended.
     }
     onLeave();
   }
