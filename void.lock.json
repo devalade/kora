@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "source": {},
+  "resolved": {
+    "account_id": "6877e6620146f261af2770e906164be3",
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "kora-db",
+        "database_id": "d3a1cd50-5339-47ec-bbf1-b9f8efa4d22e",
+        "migrations_dir": "./db/migrations"
+      }
+    ],
+    "r2_buckets": [
+      {
+        "binding": "STORAGE",
+        "bucket_name": "kora-storage"
+      }
+    ],
+    "name": "kora"
+  },
+  "text": "{\n  \"account_id\": \"6877e6620146f261af2770e906164be3\",\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_name\": \"kora-db\",\n      \"database_id\": \"d3a1cd50-5339-47ec-bbf1-b9f8efa4d22e\",\n      \"migrations_dir\": \"./db/migrations\"\n    }\n  ],\n  \"r2_buckets\": [\n    {\n      \"binding\": \"STORAGE\",\n      \"bucket_name\": \"kora-storage\"\n    }\n  ],\n  \"name\": \"kora\"\n}\n"
+}

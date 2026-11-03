@@ -36,7 +36,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 backdrop-blur-[3px] sm:items-center sm:p-6"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -46,7 +46,7 @@ export function Modal({
     >
       <div
         className={cn(
-          'animate-pop w-full rounded-t-3xl border border-line bg-paper p-6 shadow-2xl sm:rounded-3xl',
+          'animate-pop w-full rounded-t-[26px] border border-line/70 bg-paper p-6 shadow-[var(--kora-shadow-popover)] sm:rounded-[26px]',
           width,
           className,
         )}
@@ -59,7 +59,7 @@ export function Modal({
           <button
             type="button"
             onClick={onClose}
-            className="grid size-9 shrink-0 place-items-center rounded-xl text-muted transition hover:bg-line-soft hover:text-ink"
+            className="grid size-9 shrink-0 place-items-center rounded-[11px] text-muted transition-[background-color,color,transform] duration-150 ease-out hover:bg-line-soft hover:text-ink active:scale-[0.96]"
             aria-label="Close"
           >
             <X size={18} />

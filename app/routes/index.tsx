@@ -77,9 +77,12 @@ function LandingPage() {
           </Link>
           <Link
             to="/signup"
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-ink px-3.5 text-[13px] font-semibold text-paper transition hover:bg-ink-soft"
+            className="group inline-flex h-9 items-center gap-2 rounded-full bg-ink py-1 pr-1 pl-3.5 text-[13px] font-semibold text-paper transition-colors duration-150 hover:bg-ink-soft"
           >
-            Start free <ArrowRight size={14} />
+            Start free
+            <span className="grid size-7 place-items-center rounded-full bg-white/10 transition-transform duration-150 ease-out group-hover:translate-x-0.5">
+              <ArrowRight size={13} />
+            </span>
           </Link>
         </div>
       </header>
@@ -101,13 +104,16 @@ function LandingPage() {
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
                 to="/signup"
-                className="inline-flex h-12 items-center gap-2 rounded-2xl bg-coral px-5 text-sm font-semibold text-white shadow-[0_14px_30px_-14px_rgba(239,95,62,0.8)] transition hover:bg-coral-deep"
+                className="group inline-flex h-12 items-center gap-2 rounded-full bg-coral py-1 pr-1.5 pl-5 text-sm font-semibold text-white shadow-[0_14px_30px_-14px_rgba(239,95,62,0.8)] transition-colors duration-150 hover:bg-coral-deep"
               >
-                Create your workspace <ArrowRight size={16} />
+                Create your workspace
+                <span className="grid size-9 place-items-center rounded-full bg-white/16 transition-transform duration-150 ease-out group-hover:translate-x-0.5">
+                  <ArrowRight size={16} />
+                </span>
               </Link>
               <Link
                 to="/login"
-                className="inline-flex h-12 items-center gap-2 rounded-2xl border border-ink/15 bg-paper px-5 text-sm font-semibold transition hover:border-ink/30"
+                className="inline-flex h-12 items-center gap-2 rounded-full border border-ink/15 bg-paper px-6 text-sm font-semibold transition-colors duration-150 hover:border-ink/30 hover:bg-white"
               >
                 Open the demo
               </Link>
@@ -248,9 +254,12 @@ function LandingPage() {
               </p>
               <Link
                 to="/signup"
-                className="mt-7 inline-flex h-11 items-center gap-2 rounded-xl bg-coral px-4 text-sm font-semibold text-white transition hover:bg-coral-deep"
+                className="group mt-7 inline-flex h-11 items-center gap-2 rounded-full bg-coral py-1 pr-1 pl-4 text-sm font-semibold text-white transition-colors duration-150 hover:bg-coral-deep"
               >
-                Start your workspace <ArrowRight size={15} />
+                Start your workspace
+                <span className="grid size-8 place-items-center rounded-full bg-white/16 transition-transform duration-150 ease-out group-hover:translate-x-0.5">
+                  <ArrowRight size={14} />
+                </span>
               </Link>
             </div>
             <div className="grid grid-cols-2 gap-3 self-center">
@@ -286,13 +295,16 @@ function LandingPage() {
               <div className="mt-7 flex flex-wrap justify-center gap-3">
                 <Link
                   to="/signup"
-                  className="inline-flex h-12 items-center gap-2 rounded-2xl bg-ink px-5 text-sm font-semibold text-paper transition hover:bg-ink-soft"
+                  className="group inline-flex h-12 items-center gap-2 rounded-full bg-ink py-1 pr-1.5 pl-5 text-sm font-semibold text-paper transition-colors duration-150 hover:bg-ink-soft"
                 >
-                  Create an account <ArrowRight size={16} />
+                  Create an account
+                  <span className="grid size-9 place-items-center rounded-full bg-white/10 transition-transform duration-150 ease-out group-hover:translate-x-0.5">
+                    <ArrowRight size={16} />
+                  </span>
                 </Link>
                 <Link
                   to="/login"
-                  className="inline-flex h-12 items-center gap-2 rounded-2xl border border-line px-5 text-sm font-semibold transition hover:border-ink/30"
+                  className="inline-flex h-12 items-center gap-2 rounded-full border border-line px-6 text-sm font-semibold transition-colors duration-150 hover:border-ink/30 hover:bg-white"
                 >
                   <Phone size={16} /> Try the demo
                 </Link>

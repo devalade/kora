@@ -141,7 +141,7 @@ function ThreadMessage({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-[13.5px] font-semibold">{message.author.name}</span>
-          <span className="text-[11px] text-faint" title={fullDate(message.createdAt)}>
+          <span className="text-[11px] text-faint tabular-nums" title={fullDate(message.createdAt)}>
             {clockTime(message.createdAt)}
           </span>
         </div>

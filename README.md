@@ -1,5 +1,7 @@
 # Kora
 
+Live: https://kora.devalade.workers.dev
+
 Kora is a Slack-style team chat app built with Void and TanStack Start on Cloudflare. It has
 workspaces, channels, direct messages, threads, reactions, file attachments, search, presence, and
 one-click video huddles.
@@ -27,8 +29,8 @@ huddles move between them.
 - Workspaces with invite codes, public channels, private channels, and direct messages
 - Message threads with reply counts that update live
 - Emoji reactions, mentions, channel links, and seeded demo conversations
-- File and image uploads stored in R2, served through an authenticated route
-- Workspace search across every channel the signed-in user can see
+- File and image uploads with live progress, thumbnail previews, and a fullscreen image lightbox
+- Workspace search across every channel the signed-in user can see, with arrow-key and Enter navigation
 - Presence, typing indicators, unread badges, and per-channel read state
 - One-click huddles with camera, microphone, screen share, mute, and a participant grid
 - Email and password accounts with hashed passwords and HttpOnly sessions

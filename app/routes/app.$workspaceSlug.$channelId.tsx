@@ -34,6 +34,7 @@ import {
   ProfileDialog,
   SearchDialog,
 } from '../components/dialogs';
+import { ImageLightbox } from '../components/image-lightbox';
 import { MessageComposer } from '../components/message-composer';
 import { MessageList } from '../components/message-list';
 import { ThreadPanel } from '../components/thread-panel';
@@ -75,6 +76,7 @@ function WorkspacePage() {
   const [dmOpen, setDmOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -404,9 +406,9 @@ function WorkspacePage() {
               type="button"
               onClick={() => (joinedCall ? setCallOpen(true) : void joinHuddle())}
               className={cn(
-                'inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition',
+                'inline-flex h-9 items-center gap-2 rounded-[11px] border px-3 text-xs font-semibold transition-[background-color,border-color,color,transform] duration-150 ease-out active:scale-[0.96]',
                 joinedCall
-                  ? 'border-mint-deep/30 bg-mint/40 text-mint-deep'
+                  ? 'border-mint-deep/25 bg-mint/45 text-mint-deep'
                   : 'border-line text-ink-soft hover:border-ink/20 hover:bg-canvas',
               )}
             >
@@ -468,6 +470,7 @@ function WorkspacePage() {
                   onReply={(message) => setThreadId(message.id)}
                   onReact={(messageId, emoji) => void react(messageId, emoji)}
                   onOpenThread={(message) => setThreadId(message.id)}
+                  onImageOpen={(url, name) => setLightbox({ url, name })}
                 />
                 <div ref={bottomRef} className="h-4" />
               </div>
@@ -488,7 +491,7 @@ function WorkspacePage() {
                 <button
                   type="button"
                   onClick={() => void joinHuddle()}
-                  className="rounded-lg bg-mint-deep px-3 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-mint-deep px-3 py-1.5 text-xs font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-mint-deep/90 active:scale-[0.96]"
                 >
                   Join
                 </button>
@@ -575,6 +578,14 @@ function WorkspacePage() {
         snapshot={snapshot}
       />
 
+      {lightbox && (
+        <ImageLightbox
+          url={lightbox.url}
+          name={lightbox.name}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+
       {callOpen && snapshot.call && (
         <CallRoom
           key={snapshot.call.id}
@@ -601,7 +612,7 @@ function HeaderButton({
     <button
       type="button"
       onClick={onClick}
-      className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-line-soft hover:text-ink"
+      className="grid size-9 place-items-center rounded-[11px] text-muted transition-[background-color,color,transform] duration-150 ease-out hover:bg-line-soft hover:text-ink active:scale-[0.96]"
       aria-label={label}
       title={label}
     >

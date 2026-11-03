@@ -51,14 +51,33 @@ const joinButton = amina.page.getByRole('button', { name: /Join huddle/i }).firs
 await joinButton.waitFor({ timeout: 15000 });
 await joinButton.click();
 await amina.page.getByRole('banner').getByText('Huddle live').waitFor({ timeout: 20000 });
-await amina.page.waitForTimeout(5000);
+async function waitForRemote(page) {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const videos = await page.locator('video').evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        w: node.videoWidth,
+        h: node.videoHeight,
+        muted: node.muted,
+        ready: node.readyState,
+        paused: node.paused,
+      })),
+    );
+    if (videos.some((video) => !video.muted && video.w >= 160 && video.ready >= 2)) return videos;
+    await page.waitForTimeout(400);
+  }
+  return page.locator('video').evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      w: node.videoWidth,
+      h: node.videoHeight,
+      muted: node.muted,
+      ready: node.readyState,
+      paused: node.paused,
+    })),
+  );
+}
 
-const aVideos = await alade.page.locator('video').evaluateAll((nodes) =>
-  nodes.map((node) => ({ w: node.videoWidth, h: node.videoHeight, muted: node.muted })),
-);
-const bVideos = await amina.page.locator('video').evaluateAll((nodes) =>
-  nodes.map((node) => ({ w: node.videoWidth, h: node.videoHeight, muted: node.muted })),
-);
+const aVideos = await waitForRemote(alade.page);
+const bVideos = await waitForRemote(amina.page);
 
 await alade.page.screenshot({ path: '/tmp/kora-call-a.png' });
 await amina.page.screenshot({ path: '/tmp/kora-call-b.png' });

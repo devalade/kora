@@ -21,6 +21,7 @@ export function MessageList({
   onReply,
   onReact,
   onOpenThread,
+  onImageOpen,
 }: {
   messages: MessageView[];
   meId: string;
@@ -35,6 +36,7 @@ export function MessageList({
   onReply: (message: MessageView) => void;
   onReact: (messageId: string, emoji: string) => void;
   onOpenThread: (message: MessageView) => void;
+  onImageOpen: (url: string, name: string) => void;
 }) {
   return (
     <div className="pb-2">
@@ -100,6 +102,7 @@ export function MessageList({
                   onReply={onReply}
                   onReact={onReact}
                   onOpenThread={onOpenThread}
+                  onImageOpen={onImageOpen}
                 />
               </div>
             );
@@ -120,6 +123,7 @@ function MessageRow({
   onReply,
   onReact,
   onOpenThread,
+  onImageOpen,
 }: {
   message: MessageView;
   grouped: boolean;
@@ -128,11 +132,12 @@ function MessageRow({
   onReply: (message: MessageView) => void;
   onReact: (messageId: string, emoji: string) => void;
   onOpenThread: (message: MessageView) => void;
+  onImageOpen: (url: string, name: string) => void;
 }) {
   return (
     <div
       className={cn(
-        'message-row group relative -mx-2 rounded-xl px-2 transition-colors hover:bg-paper/80',
+        'message-row group relative -mx-2 rounded-xl px-2 transition-colors duration-100 hover:bg-paper/80',
         grouped ? 'py-0.5' : 'pt-3 pb-1',
       )}
     >
@@ -156,7 +161,7 @@ function MessageRow({
                 {isMine && <span className="ml-1.5 text-[11px] font-normal text-faint">you</span>}
               </span>
               <span
-                className="text-[11px] text-faint"
+                className="text-[11px] text-faint tabular-nums"
                 title={fullDate(message.createdAt)}
                 suppressHydrationWarning
               >
@@ -170,7 +175,7 @@ function MessageRow({
             </div>
           )}
 
-          <div className="text-[14.5px] leading-[1.55] text-ink-soft">
+          <div className="text-[14.5px] leading-6 text-ink-soft">
             <RichText body={message.body} channelNames={channelNames} />
             {message.editedAt && <span className="ml-1 text-[11px] text-faint">(edited)</span>}
           </div>
@@ -179,20 +184,20 @@ function MessageRow({
             <div className="mt-2 flex flex-col gap-2">
               {message.attachments.map((attachment) =>
                 attachment.mime.startsWith('image/') ? (
-                  <a
+                  <button
                     key={attachment.id}
-                    href={attachment.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block w-fit max-w-full overflow-hidden rounded-2xl border border-line bg-paper"
+                    type="button"
+                    onClick={() => onImageOpen(attachment.url, attachment.name)}
+                    className="mt-2 block w-fit max-w-full overflow-hidden rounded-2xl border border-line bg-paper transition-[border-color,transform] duration-150 ease-out hover:border-ink/20 active:scale-[0.995]"
+                    aria-label={`Open ${attachment.name}`}
                   >
                     <img
                       src={attachment.url}
                       alt={attachment.name}
                       loading="lazy"
-                      className="max-h-[320px] max-w-full object-contain"
+                      className="max-h-[320px] max-w-full object-contain outline outline-1 -outline-offset-1 outline-black/10"
                     />
-                  </a>
+                  </button>
                 ) : (
                   <a
                     key={attachment.id}
@@ -232,7 +237,7 @@ function MessageRow({
                   )}
                   title={`${reaction.count} reaction${reaction.count === 1 ? '' : 's'}`}
                 >
-                  <span className="text-[13px]">{reaction.emoji}</span>
+                  <span className="text-[14px] leading-none">{reaction.emoji}</span>
                   <span className="font-medium">{reaction.count}</span>
                 </button>
               ))}
@@ -258,7 +263,7 @@ function MessageRow({
                 {plural(message.replyCount, 'reply', 'replies')}
               </span>
               {message.lastReplyAt && (
-                <span className="font-normal text-faint" suppressHydrationWarning>
+                <span className="font-normal text-faint tabular-nums" suppressHydrationWarning>
                   last {relativeTime(message.lastReplyAt)}
                 </span>
               )}
@@ -267,13 +272,13 @@ function MessageRow({
         </div>
       </div>
 
-      <div className="message-actions absolute -top-3 right-2 flex items-center gap-0.5 rounded-xl border border-line bg-paper p-1 shadow-sm">
+      <div className="message-actions absolute -top-3 right-2 flex items-center gap-0.5 rounded-[12px] border border-line/70 bg-paper p-1 shadow-[var(--kora-shadow-popover)]">
         {QUICK_REACTIONS.map((emoji) => (
           <button
             key={emoji}
             type="button"
             onClick={() => onReact(message.id, emoji)}
-            className="grid size-7 place-items-center rounded-lg text-sm hover:bg-line-soft"
+            className="grid size-7 place-items-center rounded-lg text-[15px] leading-none transition-[background-color,transform] duration-100 hover:bg-line-soft active:scale-[0.96]"
             aria-label={`React with ${emoji}`}
           >
             {emoji}
@@ -283,7 +288,7 @@ function MessageRow({
         <button
           type="button"
           onClick={() => onReply(message)}
-          className="grid size-7 place-items-center rounded-lg text-muted hover:bg-line-soft hover:text-ink"
+          className="grid size-7 place-items-center rounded-lg text-muted transition-[background-color,color,transform] duration-100 hover:bg-line-soft hover:text-ink active:scale-[0.96]"
           aria-label="Reply in thread"
           title="Reply in thread"
         >

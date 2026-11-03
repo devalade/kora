@@ -19,6 +19,7 @@ import { cn } from '../utils/cn';
 type Peer = {
   pc: RTCPeerConnection;
   pending: RTCIceCandidateInit[];
+  createdAt: number;
 };
 
 const TURN_URL = import.meta.env.VITE_TURN_URL as string | undefined;
@@ -157,7 +158,7 @@ export function CallRoom({
         .catch(() => undefined);
     };
     poll();
-    const timer = setInterval(poll, 900);
+    const timer = setInterval(poll, 500);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call.id, me.id, localStream]);
@@ -176,6 +177,26 @@ export function CallRoom({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call.participants, me.id, localStream]);
 
+  useEffect(() => {
+    if (!localStream) return;
+    const timer = setInterval(() => {
+      const others = call.participants.filter((participant) => participant.userId !== me.id);
+      for (const participant of others) {
+        const peer = peersRef.current.get(participant.userId);
+        if (!peer) {
+          void createPeer(participant.userId, me.id < participant.userId);
+          continue;
+        }
+        if (peer.pc.connectionState !== 'connected' && Date.now() - peer.createdAt > 4000) {
+          closePeer(participant.userId);
+          void createPeer(participant.userId, me.id < participant.userId);
+        }
+      }
+    }, 1500);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call.participants, me.id, localStream]);
+
   function closePeer(userId: string) {
     const peer = peersRef.current.get(userId);
     if (!peer) return;
@@ -191,7 +212,7 @@ export function CallRoom({
   async function createPeer(userId: string, initiator: boolean) {
     if (peersRef.current.has(userId)) return peersRef.current.get(userId)!;
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    const peer: Peer = { pc, pending: [] };
+    const peer: Peer = { pc, pending: [], createdAt: Date.now() };
     peersRef.current.set(userId, peer);
 
     const stream = localStreamRef.current;

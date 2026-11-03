@@ -28,7 +28,12 @@ await page.getByRole('textbox', { name: /Message #general/i }).waitFor();
 
 const marker = `Upload test ${Date.now()}`;
 await page.locator('input[type=file]').setInputFiles('/tmp/kora-test.png');
-await page.getByText('kora-test.png').waitFor({ timeout: 15000 });
+await page.locator('img[alt="kora-test.png"]').first().waitFor({ timeout: 15000 });
+const sendButton = page.getByRole('button', { name: 'Send message' });
+for (let attempt = 0; attempt < 80; attempt++) {
+  if (await sendButton.isEnabled()) break;
+  await page.waitForTimeout(100);
+}
 await page.getByRole('textbox', { name: /Message #general/i }).fill(marker);
 await page.getByRole('textbox', { name: /Message #general/i }).press('Enter');
 await page.getByText(marker, { exact: true }).waitFor({ timeout: 15000 });

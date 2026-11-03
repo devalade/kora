@@ -209,7 +209,7 @@ export function WorkspaceSidebar({
                   params={{ workspaceSlug: snapshot.workspace.slug, channelId: channel.id }}
                   onClick={onCloseMobile}
                   className={cn(
-                    'group flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition',
+                    'group relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100',
                     channel.id === activeChannelId
                       ? 'bg-white/12 text-white'
                       : channel.unread > 0
@@ -217,10 +217,13 @@ export function WorkspaceSidebar({
                         : 'text-sidebar-text hover:bg-white/8 hover:text-white',
                   )}
                 >
+                  {channel.id === activeChannelId && (
+                    <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-coral" />
+                  )}
                   <Hash size={14} className="shrink-0 opacity-70" />
                   <span className="min-w-0 flex-1 truncate">{channel.name}</span>
                   {channel.unread > 0 && channel.id !== activeChannelId && (
-                    <span className="rounded-full bg-coral px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-coral px-1 text-[10px] font-bold text-white tabular-nums">
                       {channel.unread > 99 ? '99+' : channel.unread}
                     </span>
                   )}
@@ -252,7 +255,7 @@ export function WorkspaceSidebar({
                   params={{ workspaceSlug: snapshot.workspace.slug, channelId: dm.id }}
                   onClick={onCloseMobile}
                   className={cn(
-                    'group flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition',
+                    'group relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100',
                     dm.id === activeChannelId
                       ? 'bg-white/12 text-white'
                       : dm.unread > 0
@@ -260,6 +263,9 @@ export function WorkspaceSidebar({
                         : 'text-sidebar-text hover:bg-white/8 hover:text-white',
                   )}
                 >
+                  {dm.id === activeChannelId && (
+                    <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-coral" />
+                  )}
                   <Avatar
                     name={dm.peer?.name ?? 'Direct message'}
                     color={dm.peer?.avatarColor ?? '#736f66'}
@@ -269,7 +275,7 @@ export function WorkspaceSidebar({
                   />
                   <span className="min-w-0 flex-1 truncate">{dm.peer?.name ?? 'Direct message'}</span>
                   {dm.unread > 0 && dm.id !== activeChannelId && (
-                    <span className="rounded-full bg-coral px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-coral px-1 text-[10px] font-bold text-white tabular-nums">
                       {dm.unread}
                     </span>
                   )}
@@ -353,7 +359,7 @@ function Section({
   return (
     <div className="mb-5">
       <div className="mb-1 flex items-center justify-between px-2">
-        <span className="text-[11px] font-semibold tracking-[0.08em] text-sidebar-text/80 uppercase">
+        <span className="text-[10px] font-semibold tracking-[0.14em] text-sidebar-text/75 uppercase">
           {label}
         </span>
         {action}

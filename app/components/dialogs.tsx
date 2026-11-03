@@ -8,7 +8,7 @@ import {
   Plus,
   Search,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   createChannelFn,
@@ -420,14 +420,30 @@ export function SearchDialog({
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const hitRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     if (!open) {
       setQuery('');
       setHits([]);
       setLoading(false);
+      setActiveIndex(0);
     }
   }, [open]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, hits.length]);
+
+  useEffect(() => {
+    hitRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
+
+  function openHit(hit: SearchHit) {
+    onOpenChannel(hit.channelId);
+    onClose();
+  }
 
   useEffect(() => {
     if (!open || query.trim().length < 2) {
@@ -463,16 +479,36 @@ export function SearchDialog({
       title="Search"
       description={`Find a message anywhere in ${snapshot.workspace.name}.`}
     >
-      <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas px-3">
+      <div className="flex items-center gap-2.5 rounded-[14px] border border-line bg-canvas px-3.5 transition-[border-color,box-shadow] duration-150 focus-within:border-ink/25 focus-within:shadow-[0_0_0_3px_oklch(0.62_0.16_32_/_0.08)]">
         <Search size={16} className="text-faint" />
         <input
           autoFocus
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setActiveIndex((index) => Math.min(index + 1, Math.max(0, hits.length - 1)));
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setActiveIndex((index) => Math.max(0, index - 1));
+            } else if (event.key === 'Enter' && hits[activeIndex]) {
+              event.preventDefault();
+              openHit(hits[activeIndex]);
+            } else if (event.key === 'Escape') {
+              onClose();
+            }
+          }}
           placeholder="Search messages, people, decisions..."
           className="h-12 flex-1 bg-transparent text-sm outline-none"
         />
-        {loading && <Loader2 size={15} className="animate-spin text-faint" />}
+        {loading ? (
+          <Loader2 size={15} className="animate-spin text-faint" />
+        ) : (
+          <kbd className="rounded-md border border-line/80 bg-paper px-1.5 py-0.5 font-mono text-[9px] text-faint">
+            esc
+          </kbd>
+        )}
       </div>
       <div className="scroll-thin mt-3 max-h-[50vh] space-y-1 overflow-y-auto">
         {query.trim().length < 2 && (
@@ -483,15 +519,19 @@ export function SearchDialog({
         {query.trim().length >= 2 && !loading && hits.length === 0 && (
           <p className="px-3 py-8 text-center text-sm text-muted">No messages matched that.</p>
         )}
-        {hits.map((hit) => (
+        {hits.map((hit, index) => (
           <button
             key={hit.message.id}
-            type="button"
-            onClick={() => {
-              onOpenChannel(hit.channelId);
-              onClose();
+            ref={(element) => {
+              hitRefs.current[index] = element;
             }}
-            className="flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-canvas"
+            type="button"
+            onMouseEnter={() => setActiveIndex(index)}
+            onClick={() => openHit(hit)}
+            className={cn(
+              'flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-100',
+              index === activeIndex ? 'bg-canvas' : 'hover:bg-canvas/70',
+            )}
           >
             <Avatar
               name={hit.message.author.name}
@@ -502,12 +542,25 @@ export function SearchDialog({
               <span className="flex items-baseline gap-2">
                 <span className="text-[13px] font-semibold">{hit.message.author.name}</span>
                 <span className="text-[11px] text-faint">#{hit.channelName}</span>
-                <span className="ml-auto text-[11px] text-faint">{clockTime(hit.message.createdAt)}</span>
+                <span className="ml-auto text-[11px] text-faint tabular-nums">
+                  {clockTime(hit.message.createdAt)}
+                </span>
               </span>
               <span className="mt-0.5 block truncate text-[13px] text-muted">{hit.message.body}</span>
             </span>
           </button>
         ))}
+      </div>
+      <div className="mt-3 flex items-center gap-3 border-t border-line-soft pt-3 text-[10px] text-faint">
+        <span className="inline-flex items-center gap-1">
+          <kbd className="rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[9px]">↑↓</kbd>
+          navigate
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <kbd className="rounded border border-line bg-canvas px-1 py-0.5 font-mono text-[9px]">↵</kbd>
+          open
+        </span>
+        <span className="ml-auto">Search covers every channel you can see.</span>
       </div>
     </Modal>
   );
