@@ -167,7 +167,12 @@ export const calls = sqliteTable(
     startedAt: text('started_at').notNull().default(nowIso),
     endedAt: text('ended_at'),
   },
-  (table) => [index('calls_channel_idx').on(table.channelId, table.endedAt)],
+  (table) => [
+    index('calls_channel_idx').on(table.channelId, table.endedAt),
+    uniqueIndex('calls_channel_active_idx')
+      .on(table.channelId)
+      .where(sql`${table.endedAt} is null`),
+  ],
 );
 
 export const callParticipants = sqliteTable(

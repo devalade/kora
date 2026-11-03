@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   getChannelPageFn,
+  markReadFn,
   openDmFn,
   sendMessageFn,
   setTypingFn,
@@ -109,6 +110,9 @@ function WorkspacePage() {
       ) {
         setSnapshot(next);
         setHasMore(next.hasMore);
+        if (next.channel?.unread && document.visibilityState === 'visible') {
+          void markReadFn({ data: { channelId: next.channel.id } });
+        }
       }
     } catch {
       // A dropped poll is recovered by the next tick.
@@ -121,6 +125,7 @@ function WorkspacePage() {
     setThreadId(null);
     setSidebarOpen(false);
     setMembersOpen(false);
+    setCallOpen(false);
     stickRef.current = true;
     lastMessageId.current = null;
   }, [params.workspaceSlug, params.channelId]);
@@ -136,10 +141,37 @@ function WorkspacePage() {
   }, [initial]);
 
   useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), 2000);
-    return () => clearInterval(timer);
+    const tick = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    tick();
+    const timer = setInterval(tick, 2000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [load]);
+
+  useEffect(() => {
+    if (!channel) return;
+    const mark = () => {
+      if (document.visibilityState !== 'visible') return;
+      void markReadFn({ data: { channelId: channel.id } });
+    };
+    mark();
+    window.addEventListener('focus', mark);
+    document.addEventListener('visibilitychange', mark);
+    return () => {
+      window.removeEventListener('focus', mark);
+      document.removeEventListener('visibilitychange', mark);
+    };
+  }, [channel?.id]);
 
   const messages = useMemo(() => {
     const byId = new Map<string, MessageView>();
@@ -196,14 +228,16 @@ function WorkspacePage() {
     if (!channel || loadingMore || !hasMore) return;
     const first = messages[0];
     if (!first) return;
+    const targetChannelId = channel.id;
     setLoadingMore(true);
     const element = scrollRef.current;
     const previousHeight = element?.scrollHeight ?? 0;
     const previousTop = element?.scrollTop ?? 0;
     try {
       const page = await getChannelPageFn({
-        data: { channelId: channel.id, before: first.createdAt },
+        data: { channelId: targetChannelId, before: first.createdAt },
       });
+      if (paramsRef.current.channelId !== targetChannelId) return;
       setOlder((current) => [...page.messages, ...current]);
       setHasMore(page.hasMore);
       requestAnimationFrame(() => {
@@ -462,6 +496,7 @@ function WorkspacePage() {
             )}
 
             <MessageComposer
+              key={channel.id}
               channelLabel={channel.kind === 'dm' ? channelLabel : `#${channelLabel}`}
               placeholder={
                 channel.kind === 'dm'
@@ -475,6 +510,7 @@ function WorkspacePage() {
 
           {threadId ? (
             <ThreadPanel
+              key={threadId}
               messageId={threadId}
               channelName={channelLabel}
               onClose={() => setThreadId(null)}
@@ -541,6 +577,7 @@ function WorkspacePage() {
 
       {callOpen && snapshot.call && (
         <CallRoom
+          key={snapshot.call.id}
           call={snapshot.call}
           me={snapshot.me}
           channelName={channelLabel}

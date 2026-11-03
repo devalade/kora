@@ -63,7 +63,7 @@ const bVideos = await amina.page.locator('video').evaluateAll((nodes) =>
 await alade.page.screenshot({ path: '/tmp/kora-call-a.png' });
 await amina.page.screenshot({ path: '/tmp/kora-call-b.png' });
 
-await amina.page.getByRole('button', { name: /Leave/i }).click();
+await amina.page.getByRole('button', { name: 'Leave', exact: true }).click();
 await amina.page.waitForTimeout(2500);
 const aAfter = await alade.page.getByText(/in the room/i).innerText();
 

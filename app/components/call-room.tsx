@@ -60,8 +60,13 @@ export function CallRoom({
   const sharingRef = useRef(false);
   const signalQueue = useRef<Promise<void>>(Promise.resolve());
   const leftRef = useRef(false);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (leaveTimer.current) {
+      clearTimeout(leaveTimer.current);
+      leaveTimer.current = null;
+    }
     let cancelled = false;
     async function start() {
       try {
@@ -88,7 +93,9 @@ export function CallRoom({
           cameraRef.current = false;
           setMediaError('Camera unavailable. You joined with audio only.');
         } catch {
+          if (cancelled) return;
           setMediaError('Microphone and camera are blocked. Check browser permissions.');
+          void leave();
         }
       }
     }
@@ -99,7 +106,12 @@ export function CallRoom({
       screenRef.current?.getTracks().forEach((track) => track.stop());
       for (const peer of peersRef.current.values()) peer.pc.close();
       peersRef.current.clear();
-      if (!leftRef.current) void leaveCallFn({ data: { callId: call.id } }).catch(() => undefined);
+      if (!leftRef.current) {
+        // React may clean up and re-run an effect in development. Give the remount a moment first.
+        leaveTimer.current = setTimeout(() => {
+          if (!leftRef.current) void leaveCallFn({ data: { callId: call.id } }).catch(() => undefined);
+        }, 600);
+      }
     };
   }, [call.id]);
 
@@ -116,6 +128,7 @@ export function CallRoom({
   }, []);
 
   useEffect(() => {
+    if (!localStream) return;
     const send = () => {
       void heartbeatCallFn({
         data: {
@@ -129,7 +142,7 @@ export function CallRoom({
     send();
     const timer = setInterval(send, 3000);
     return () => clearInterval(timer);
-  }, [call.id]);
+  }, [call.id, localStream]);
 
   useEffect(() => {
     if (!localStream) return;
@@ -183,7 +196,11 @@ export function CallRoom({
 
     const stream = localStreamRef.current;
     if (stream) {
-      for (const track of stream.getTracks()) pc.addTrack(track, stream);
+      const video = sharingRef.current
+        ? screenRef.current?.getVideoTracks()[0] ?? stream.getVideoTracks()[0]
+        : stream.getVideoTracks()[0];
+      if (video) pc.addTrack(video, stream);
+      for (const audio of stream.getAudioTracks()) pc.addTrack(audio, stream);
     }
 
     pc.onicecandidate = (event) => {
@@ -507,7 +524,9 @@ function VideoTile({
     void ref.current.play().catch(() => undefined);
   }, [stream]);
 
-  const hasVideo = stream && stream.getVideoTracks().length > 0 && cameraOn;
+  const hasVideo = Boolean(
+    stream && stream.getVideoTracks().length > 0 && (cameraOn || sharing),
+  );
 
   return (
     <div

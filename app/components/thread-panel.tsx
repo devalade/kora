@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getThreadFn, sendMessageFn, toggleReactionFn } from '../lib/chat';
 import type { MessageView, ThreadView } from '../lib/types';
@@ -22,18 +22,22 @@ export function ThreadPanel({
 }) {
   const [thread, setThread] = useState<ThreadView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const requestRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      const request = ++requestRef.current;
       try {
         const next = await getThreadFn({ data: { messageId } });
-        if (!cancelled) {
+        if (!cancelled && request === requestRef.current) {
           setThread(next);
           setError(null);
         }
       } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : 'Thread not found.');
+        if (!cancelled && request === requestRef.current) {
+          setError(caught instanceof Error ? caught.message : 'Thread not found.');
+        }
       }
     }
     void load();
@@ -45,7 +49,9 @@ export function ThreadPanel({
   }, [messageId]);
 
   async function refresh() {
+    const request = ++requestRef.current;
     const next = await getThreadFn({ data: { messageId } });
+    if (request !== requestRef.current) return;
     setThread(next);
     onChanged();
   }

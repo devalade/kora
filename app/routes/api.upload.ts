@@ -21,6 +21,10 @@ export const Route = createFileRoute('/api/upload')({
       POST: async ({ request }) => {
         const me = await readSessionUser();
         if (!me) return Response.json({ error: 'Sign in required.' }, { status: 401 });
+        const declaredLength = Number(request.headers.get('content-length') ?? '0');
+        if (Number.isFinite(declaredLength) && declaredLength > MAX_BYTES + 1_000_000) {
+          return Response.json({ error: 'Files are limited to 25 MB.' }, { status: 413 });
+        }
         const form = await request.formData();
         const file = form.get('file');
         if (!(file instanceof File)) {
@@ -32,8 +36,11 @@ export const Route = createFileRoute('/api/upload')({
         if (file.size > MAX_BYTES) {
           return Response.json({ error: 'Files are limited to 25 MB.' }, { status: 400 });
         }
-        const mime = file.type || 'application/octet-stream';
-        if (BLOCKED.has(mime)) {
+        const mime = (file.type || 'application/octet-stream')
+          .split(';')[0]
+          .trim()
+          .toLowerCase();
+        if (BLOCKED.has(mime) || mime === 'image/svg+xml') {
           return Response.json({ error: 'That file type is not supported.' }, { status: 400 });
         }
         const id = newId();

@@ -5,7 +5,10 @@ import { getSessionUserFn, signUpFn } from '../lib/auth';
 import { AuthLayout } from '../components/auth-layout';
 
 function safeRedirect(value: unknown) {
-  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
+  return typeof value === 'string' &&
+    value.startsWith('/') &&
+    !value.startsWith('//') &&
+    !value.includes('\\')
     ? value
     : undefined;
 }

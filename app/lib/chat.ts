@@ -15,6 +15,7 @@ import {
 import {
   attachments,
   callParticipants,
+  callSignals,
   calls,
   channelMembers,
   channels,
@@ -42,7 +43,7 @@ import type {
 
 const LIVE_WINDOW_MS = 75_000;
 const TYPING_WINDOW_MS = 5_000;
-const CALL_STALE_MS = 45_000;
+const CALL_STALE_MS = 120_000;
 
 type MessageBase = {
   id: string;
@@ -404,7 +405,7 @@ export const joinChannelFn = createServerFn({ method: 'POST' })
     const [channel] = await db.select().from(channels).where(eq(channels.id, data.channelId));
     if (!channel) throw new Error('Channel not found.');
     await requireWorkspace(channel.workspaceId, me.id);
-    if (channel.kind === 'private') throw new Error('Ask a member to add you to this private channel.');
+    if (channel.kind !== 'public') throw new Error('This channel is invite only.');
     await db.insert(channelMembers).values({ channelId: channel.id, userId: me.id }).onConflictDoNothing();
     return { ok: true as const };
   });
@@ -479,6 +480,7 @@ async function activeCall(channelId: string, now: number): Promise<CallView | nu
     .orderBy(asc(callParticipants.joinedAt));
   if (live.length === 0) {
     await db.update(calls).set({ endedAt: new Date().toISOString() }).where(eq(calls.id, call.id));
+    await db.delete(callSignals).where(eq(callSignals.callId, call.id));
     return null;
   }
   return {
@@ -611,13 +613,6 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
 
     const messagesView = await hydrateMessages(messageRows, me.id);
     const channel = selected;
-    if (channel) {
-      await db
-        .update(channelMembers)
-        .set({ lastReadAt: new Date().toISOString() })
-        .where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.userId, me.id)));
-      channel.unread = 0;
-    }
 
     return {
       workspace: {
@@ -706,10 +701,11 @@ export const sendMessageFn = createServerFn({ method: 'POST' })
     if (!body && data.attachmentIds.length === 0) throw new Error('Write something first.');
     if (data.parentId) {
       const [parent] = await db
-        .select({ channelId: messages.channelId })
+        .select({ channelId: messages.channelId, parentId: messages.parentId })
         .from(messages)
         .where(and(eq(messages.id, data.parentId), isNull(messages.deletedAt)));
       if (!parent || parent.channelId !== data.channelId) throw new Error('Thread not found.');
+      if (parent.parentId) throw new Error('Reply in the original thread instead.');
     }
     const id = newId();
     await db.insert(messages).values({
@@ -748,32 +744,25 @@ export const toggleReactionFn = createServerFn({ method: 'POST' })
       .where(and(eq(messages.id, data.messageId), isNull(messages.deletedAt)));
     if (!message) throw new Error('Message not found.');
     await requireChannel(message.channelId, me.id);
-    const existing = await db
-      .select({ userId: reactions.userId })
-      .from(reactions)
+    const removed = await db
+      .delete(reactions)
       .where(
         and(
           eq(reactions.messageId, data.messageId),
           eq(reactions.userId, me.id),
           eq(reactions.emoji, data.emoji),
         ),
-      );
-    if (existing.length > 0) {
+      )
+      .returning({ userId: reactions.userId });
+    if (removed.length === 0) {
       await db
-        .delete(reactions)
-        .where(
-          and(
-            eq(reactions.messageId, data.messageId),
-            eq(reactions.userId, me.id),
-            eq(reactions.emoji, data.emoji),
-          ),
-        );
-    } else {
-      await db.insert(reactions).values({
-        messageId: data.messageId,
-        userId: me.id,
-        emoji: data.emoji,
-      });
+        .insert(reactions)
+        .values({
+          messageId: data.messageId,
+          userId: me.id,
+          emoji: data.emoji,
+        })
+        .onConflictDoNothing();
     }
     return { ok: true as const };
   });

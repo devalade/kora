@@ -26,7 +26,8 @@ export function MessageComposer({
 }) {
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<Uploaded[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const uploading = uploadingCount > 0;
   const [sending, setSending] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -47,7 +48,7 @@ export function MessageComposer({
   }
 
   async function upload(file: File) {
-    setUploading(true);
+    setUploadingCount((count) => count + 1);
     try {
       const form = new FormData();
       form.append('file', file);
@@ -58,13 +59,13 @@ export function MessageComposer({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
-      setUploading(false);
+      setUploadingCount((count) => Math.max(0, count - 1));
     }
   }
 
   async function submit() {
     const text = body.trim();
-    if ((!text && files.length === 0) || sending) return;
+    if ((!text && files.length === 0) || sending || uploading) return;
     setSending(true);
     try {
       await onSend(text, files.map((file) => file.id));

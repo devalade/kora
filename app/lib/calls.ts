@@ -5,16 +5,54 @@ import { z } from 'zod';
 import { requireChannel, requireUser } from './server';
 import { newId } from './ids';
 
-const STALE_MS = 45_000;
+const STALE_MS = 120_000;
 
 async function activeCallId(channelId: string) {
   const rows = await db
     .select({ id: calls.id })
     .from(calls)
     .where(and(eq(calls.channelId, channelId), isNull(calls.endedAt)))
-    .orderBy(calls.startedAt)
     .limit(1);
   return rows[0]?.id ?? null;
+}
+
+async function liveParticipantCount(callId: string, now = Date.now()) {
+  const rows = await db
+    .select({ userId: callParticipants.userId })
+    .from(callParticipants)
+    .where(
+      and(
+        eq(callParticipants.callId, callId),
+        isNull(callParticipants.leftAt),
+        gt(callParticipants.lastSeenAt, new Date(now - STALE_MS).toISOString()),
+      ),
+    );
+  return rows.length;
+}
+
+async function endCall(callId: string) {
+  await db.update(calls).set({ endedAt: new Date().toISOString() }).where(eq(calls.id, callId));
+  await db.delete(callSignals).where(eq(callSignals.callId, callId));
+}
+
+async function reapStaleCall(channelId: string) {
+  const callId = await activeCallId(channelId);
+  if (!callId) return;
+  if ((await liveParticipantCount(callId)) === 0) await endCall(callId);
+}
+
+async function requireParticipant(callId: string, userId: string) {
+  const rows = await db
+    .select({ userId: callParticipants.userId })
+    .from(callParticipants)
+    .where(
+      and(
+        eq(callParticipants.callId, callId),
+        eq(callParticipants.userId, userId),
+        isNull(callParticipants.leftAt),
+      ),
+    );
+  if (rows.length === 0) throw new Error('You are not in this call.');
 }
 
 export const joinCallFn = createServerFn({ method: 'POST' })
@@ -22,15 +60,23 @@ export const joinCallFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const me = await requireUser();
     await requireChannel(data.channelId, me.id);
+    await reapStaleCall(data.channelId);
+
     let callId = await activeCallId(data.channelId);
     if (!callId) {
-      callId = newId();
-      await db.insert(calls).values({
-        id: callId,
-        channelId: data.channelId,
-        startedBy: me.id,
-      });
+      const candidate = newId();
+      await db
+        .insert(calls)
+        .values({
+          id: candidate,
+          channelId: data.channelId,
+          startedBy: me.id,
+        })
+        .onConflictDoNothing();
+      callId = await activeCallId(data.channelId);
+      if (!callId) throw new Error('Could not start the huddle.');
     }
+
     const now = new Date().toISOString();
     await db
       .insert(callParticipants)
@@ -61,18 +107,20 @@ export const heartbeatCallFn = createServerFn({ method: 'POST' })
     const [call] = await db.select().from(calls).where(eq(calls.id, data.callId));
     if (!call || call.endedAt) throw new Error('This call has ended.');
     await requireChannel(call.channelId, me.id);
-    const now = new Date().toISOString();
     await db
       .update(callParticipants)
       .set({
-        lastSeenAt: now,
+        lastSeenAt: new Date().toISOString(),
         muted: data.muted,
         cameraOn: data.cameraOn,
         sharing: data.sharing,
-        leftAt: null,
       })
       .where(
-        and(eq(callParticipants.callId, data.callId), eq(callParticipants.userId, me.id)),
+        and(
+          eq(callParticipants.callId, data.callId),
+          eq(callParticipants.userId, me.id),
+          isNull(callParticipants.leftAt),
+        ),
       );
     return { ok: true as const };
   });
@@ -85,19 +133,7 @@ export const leaveCallFn = createServerFn({ method: 'POST' })
       .update(callParticipants)
       .set({ leftAt: new Date().toISOString() })
       .where(and(eq(callParticipants.callId, data.callId), eq(callParticipants.userId, me.id)));
-    const remaining = await db
-      .select({ userId: callParticipants.userId })
-      .from(callParticipants)
-      .where(
-        and(
-          eq(callParticipants.callId, data.callId),
-          isNull(callParticipants.leftAt),
-          gt(callParticipants.lastSeenAt, new Date(Date.now() - STALE_MS).toISOString()),
-        ),
-      );
-    if (remaining.length === 0) {
-      await db.update(calls).set({ endedAt: new Date().toISOString() }).where(eq(calls.id, data.callId));
-    }
+    if ((await liveParticipantCount(data.callId)) === 0) await endCall(data.callId);
     return { ok: true as const };
   });
 
@@ -115,6 +151,8 @@ export const sendCallSignalFn = createServerFn({ method: 'POST' })
     const [call] = await db.select().from(calls).where(eq(calls.id, data.callId));
     if (!call || call.endedAt) throw new Error('This call has ended.');
     await requireChannel(call.channelId, me.id);
+    await requireParticipant(data.callId, me.id);
+
     const recipient = await db
       .select({ userId: callParticipants.userId })
       .from(callParticipants)
@@ -143,6 +181,7 @@ export const pollCallSignalsFn = createServerFn({ method: 'GET' })
   .validator(z.object({ callId: z.string() }))
   .handler(async ({ data }) => {
     const me = await requireUser();
+    await requireParticipant(data.callId, me.id);
     const rows = await db
       .select()
       .from(callSignals)
@@ -170,15 +209,4 @@ export const pollCallSignalsFn = createServerFn({ method: 'GET' })
         usernameFragment?: string | null;
       },
     }));
-  });
-
-export const pingCallFn = createServerFn({ method: 'POST' })
-  .validator(z.object({ callId: z.string() }))
-  .handler(async ({ data }) => {
-    const me = await requireUser();
-    await db
-      .update(callParticipants)
-      .set({ lastSeenAt: new Date().toISOString() })
-      .where(and(eq(callParticipants.callId, data.callId), eq(callParticipants.userId, me.id)));
-    return { ok: true as const };
   });

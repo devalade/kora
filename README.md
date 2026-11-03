@@ -144,7 +144,7 @@ data.
 
 - Realtime chat uses polling, not WebSockets or Durable Objects.
 - Huddles are a peer-to-peer mesh, best for small rooms of two to four people.
-- There is no TURN service configured, so some restrictive networks will fail to connect calls.
+- TURN is optional. Without `VITE_TURN_*` credentials, some restrictive networks will fail to connect calls.
 - Email invites, push notifications, message editing, and message deletion are not built yet.
 - Search uses `LIKE` and is intended for small teams, not large message archives.
 

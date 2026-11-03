@@ -15,6 +15,13 @@
       "when": 1793734539577,
       "tag": "20261103193539_eager_excalibur",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793735834016,
+      "tag": "20261103195714_tearful_goblin_queen",
+      "breakpoints": true
     }
   ]
 }

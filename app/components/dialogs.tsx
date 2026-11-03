@@ -425,12 +425,14 @@ export function SearchDialog({
     if (!open) {
       setQuery('');
       setHits([]);
+      setLoading(false);
     }
   }, [open]);
 
   useEffect(() => {
     if (!open || query.trim().length < 2) {
       setHits([]);
+      setLoading(false);
       return;
     }
     let cancelled = false;
@@ -534,7 +536,9 @@ export function ProfileDialog({
     setTitle(me.title);
     setStatusEmoji(me.statusEmoji);
     setStatusText(me.statusText);
-  }, [open, me]);
+    // The parent replaces `me` on every poll. Only reset the form when the dialog opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   async function save() {
     setSaving(true);

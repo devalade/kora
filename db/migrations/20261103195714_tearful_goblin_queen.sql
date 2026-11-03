@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `calls_channel_active_idx` ON `calls` (`channel_id`) WHERE "calls"."ended_at" is null;
