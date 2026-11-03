@@ -57,3 +57,20 @@ export function memberNameFromEmail(email: string) {
     .map((part) => part[0]?.toUpperCase() + part.slice(1))
     .join(' ');
 }
+
+
+/** A stable hue per name, from the premium-react identity system. */
+export function hueOf(seed: string) {
+  let h = 2166136261;
+  for (const char of String(seed ?? '')) h = Math.imul(h ^ char.codePointAt(0)!, 16777619);
+  return (h >>> 0) % 360;
+}
+
+export function avatarTone(seed: string) {
+  const h = hueOf(seed);
+  return {
+    bg: `oklch(0.93 0.045 ${h})`,
+    fg: `oklch(0.38 0.09 ${h})`,
+    ring: `conic-gradient(from 210deg, oklch(0.74 0.13 ${h}), oklch(0.8 0.1 ${(h + 45) % 360}), oklch(0.74 0.13 ${h}))`,
+  };
+}
