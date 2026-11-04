@@ -358,6 +358,10 @@ function TasksPage() {
         onView={(next) => {
           setView(next);
           setSidebarOpen(false);
+          if (next === 'all' || next === 'mine') {
+            setProjectFilter('all');
+            setLabelFilter('all');
+          }
         }}
         onProject={(id) => {
           setProjectFilter(id);
@@ -565,6 +569,7 @@ function TasksPage() {
         onClose={() => setNewOpen(false)}
         snapshot={snapshot}
         initialStatus={newStatus}
+        initialProjectId={projectFilter !== 'all' ? projectFilter : undefined}
         onCreated={async (issueId) => {
           await loadSnapshot();
           openIssue(issueId);
@@ -984,7 +989,7 @@ function BoardView({
   onSelect: (id: string) => void;
   onMove: (id: string, status: TaskStatus) => void;
 }) {
-  const columns = STATUS_ORDER.filter((status) => status !== 'canceled');
+  const columns = STATUS_ORDER;
   return (
     <div className="scroll-thin flex min-h-0 flex-1 gap-3 overflow-x-auto p-4">
       {columns.map((status) => {

@@ -24,12 +24,14 @@ export function NewIssueDialog({
   onClose,
   snapshot,
   initialStatus = 'todo',
+  initialProjectId,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   snapshot: TasksSnapshot;
   initialStatus?: TaskStatus;
+  initialProjectId?: string;
   onCreated: (issueId: string) => void;
 }) {
   const [title, setTitle] = useState('');
@@ -46,7 +48,7 @@ export function NewIssueDialog({
     if (!open) return;
     setTitle('');
     setDescription('');
-    setProjectId(snapshot.projects[0]?.id ?? '');
+    setProjectId(initialProjectId ?? snapshot.projects[0]?.id ?? '');
     setStatus(initialStatus);
     setPriority(0);
     setAssigneeId('');
@@ -55,7 +57,7 @@ export function NewIssueDialog({
     requestAnimationFrame(() => titleRef.current?.focus());
     // The parent replaces snapshot on every poll; only reset when the dialog opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialStatus]);
+  }, [open, initialStatus, initialProjectId]);
 
   async function submit() {
     if (!title.trim() || !projectId || saving) return;
