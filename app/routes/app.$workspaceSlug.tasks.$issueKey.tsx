@@ -119,7 +119,7 @@ function IssuePage() {
       }
     };
     ping();
-    const timer = setInterval(ping, 5000);
+    const timer = setInterval(ping, 4000);
     return () => clearInterval(timer);
   }, [issue.id]);
 
@@ -151,7 +151,7 @@ function IssuePage() {
         // The next poll recovers a dropped read.
       }
     };
-    const timer = setInterval(refresh, 3000);
+    const timer = setInterval(refresh, 2000);
     return () => {
       cancelled = true;
       clearInterval(timer);
