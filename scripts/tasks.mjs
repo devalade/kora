@@ -49,10 +49,11 @@ await page.waitForTimeout(600);
 await page.getByRole('link', { name: /New issue/ }).first().click();
 await page.waitForURL('**/tasks/new');
 await page.getByLabel('Issue title').fill('Smoke test issue');
-await page.getByLabel('Issue description').fill('Created by the smoke test.');
+await page.getByLabel('Issue description').fill('Created by the smoke test.\n\n- [ ] One\n- [x] Two');
 await page.getByRole('button', { name: /Create issue/ }).click();
 await page.waitForURL(/\/tasks\/KOR-\d+$/);
 const createdTitle = await page.getByLabel('Issue title').inputValue();
+const createdTasks = await page.getByRole('checkbox').count();
 await page.getByLabel('Leave a comment').fill('Smoke test comment.');
 await page.getByRole('button', { name: 'Comment' }).click();
 await page.waitForTimeout(500);
@@ -67,7 +68,7 @@ const deleted = (await page.getByText('Smoke test issue').count()) === 0;
 
 await page.getByRole('button', { name: /Manage/ }).click();
 await page.getByLabel('New status name').fill('QA Smoke');
-await page.getByRole('dialog').getByRole('button', { name: 'Add', exact: true }).click();
+await page.getByRole('dialog').getByRole('button', { name: 'Add status' }).click();
 await page.waitForTimeout(1000);
 const statusAdded = await page.getByLabel('Delete QA Smoke').count();
 await page.getByLabel('Delete QA Smoke').click();
@@ -96,6 +97,7 @@ console.log(
       searchVisible,
       boardColumns,
       createdTitle,
+      createdTasks,
       createdComment,
       deleted,
       statusAdded,

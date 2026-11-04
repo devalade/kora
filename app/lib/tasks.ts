@@ -18,6 +18,7 @@ import { memberUsers, requireWorkspace, touchPresence } from './server';
 import { readSessionUser } from './session';
 import {
   DEFAULT_TASK_STATUSES,
+  TASK_LABEL_COLORS,
   TASK_STATUS_CATEGORIES,
 } from './task-config';
 import type {
@@ -34,6 +35,12 @@ import type {
 
 const PRIORITIES = [0, 1, 2, 3, 4] as const;
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a six digit hex color.');
+
+function colorForLabel(name: string) {
+  let hash = 0;
+  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return TASK_LABEL_COLORS[Math.abs(hash) % TASK_LABEL_COLORS.length] ?? TASK_LABEL_COLORS[0];
+}
 
 const issueSelection = {
   id: issues.id,
@@ -598,6 +605,48 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
       .innerJoin(users, eq(users.id, issueComments.userId))
       .where(eq(issueComments.id, commentId));
     return { comment: toComment(row) };
+  });
+
+export const createLabelFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      slug: z.string(),
+      name: z.string().trim().min(1, 'Give the label a name').max(30),
+      issueId: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const { workspace } = await workspaceForSlug(data.slug, me.id);
+    const rows = await db
+      .select({ id: labels.id, name: labels.name, color: labels.color })
+      .from(labels)
+      .where(eq(labels.workspaceId, workspace.id));
+    let label = rows.find((row) => row.name.toLowerCase() === data.name.toLowerCase());
+    const created = !label;
+    if (!label) {
+      label = {
+        id: newId(),
+        name: data.name,
+        color: colorForLabel(data.name),
+      };
+      await db.insert(labels).values({
+        id: label.id,
+        workspaceId: workspace.id,
+        name: label.name,
+        color: label.color,
+      });
+    }
+    if (data.issueId) {
+      const issue = await requireIssue(data.issueId, me.id);
+      if (issue.workspaceId !== workspace.id) throw new Error('Issue not found.');
+      await db
+        .insert(issueLabels)
+        .values({ issueId: data.issueId, labelId: label.id })
+        .onConflictDoNothing();
+    }
+    return { label, created };
   });
 
 export const createTaskStatusFn = createServerFn({ method: 'POST' })

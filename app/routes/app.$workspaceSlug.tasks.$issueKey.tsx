@@ -23,19 +23,18 @@ import { addTaskCommentFn, deleteIssueFn, getIssueFn, getTasksFn, updateIssueFn 
 import type {
   TaskIssue,
   TaskIssueDetail,
+  TaskLabel,
   TaskPriority,
   TasksSnapshot,
 } from '../lib/types';
 import { relativeTime } from '../lib/format';
+import { taskProgress } from '../lib/markdown';
 import { Avatar } from '../components/avatar';
+import { LabelPicker } from '../components/label-picker';
+import { MarkdownEditor } from '../components/markdown-editor';
 import { Modal } from '../components/modal';
 import { PropertySelect } from '../components/property-select';
-import {
-  PRIORITY_META,
-  TaskLabelPill,
-  TaskPriorityIcon,
-  TaskStatusIcon,
-} from '../components/task-icons';
+import { PRIORITY_META, TaskPriorityIcon, TaskStatusIcon } from '../components/task-icons';
 import { TasksSidebar } from '../components/tasks-sidebar';
 import { cn } from '../utils/cn';
 
@@ -81,16 +80,8 @@ function IssuePage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
   const issue = detail.issue;
-
-  useEffect(() => {
-    const element = descriptionRef.current;
-    if (!element) return;
-    element.style.height = '0px';
-    element.style.height = `${Math.min(520, Math.max(120, element.scrollHeight))}px`;
-  }, [description]);
 
   useEffect(() => {
     setDetail(initialDetail);
@@ -161,6 +152,22 @@ function IssuePage() {
     if (description === issue.description) return;
     const saved = await patchIssue({ description });
     if (!saved) setDescription(issue.description);
+  }
+
+  function addLabelToIssue(label: TaskLabel) {
+    setDetail((current) =>
+      current.issue.labels.some((item) => item.id === label.id)
+        ? current
+        : { ...current, issue: { ...current.issue, labels: [...current.issue.labels, label] } },
+    );
+    void router.invalidate();
+  }
+
+  async function saveTaskToggle(next: string) {
+    const before = description;
+    setDescription(next);
+    const saved = await patchIssue({ description: next });
+    if (!saved) setDescription(before);
   }
 
   async function submitComment() {
@@ -312,28 +319,24 @@ function IssuePage() {
                   maxLength={200}
                 />
 
-                <div className="mt-6 rounded-xl border border-line bg-paper p-4">
-                  <textarea
-                    ref={descriptionRef}
+                <div className="mt-6">
+                  <MarkdownEditor
                     value={description}
-                    onChange={(event) => setDescription(event.target.value)}
+                    onChange={setDescription}
                     onBlur={() => void saveDescription()}
-                    onKeyDown={(event) => {
-                      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                        event.preventDefault();
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    placeholder="Add a description, context, or a link"
-                    rows={1}
-                    maxLength={8000}
-                    aria-label="Issue description"
-                    className="min-h-[120px] w-full resize-none overflow-y-auto border-0 bg-transparent p-0 text-[16px] leading-6 outline-none placeholder:text-faint sm:text-[14px]"
+                    onToggleTask={(next) => void saveTaskToggle(next)}
+                    placeholder="Write the issue in Markdown..."
+                    ariaLabel="Issue description"
                   />
                 </div>
 
                 <div className="mt-6 lg:hidden">
-                  <IssueProperties issue={issue} snapshot={snapshot} patchIssue={patchIssue} />
+                  <IssueProperties
+                  issue={issue}
+                  snapshot={snapshot}
+                  patchIssue={patchIssue}
+                  onLabelCreated={addLabelToIssue}
+                />
                 </div>
 
                 <div className="mt-10 border-t border-line pt-6">
@@ -416,7 +419,12 @@ function IssuePage() {
               </article>
 
               <aside className="hidden h-fit lg:sticky lg:top-8 lg:block">
-                <IssueProperties issue={issue} snapshot={snapshot} patchIssue={patchIssue} />
+                <IssueProperties
+                    issue={issue}
+                    snapshot={snapshot}
+                    patchIssue={patchIssue}
+                    onLabelCreated={addLabelToIssue}
+                  />
 
                 <button
                   type="button"
@@ -465,11 +473,14 @@ function IssueProperties({
   issue,
   snapshot,
   patchIssue,
+  onLabelCreated,
 }: {
   issue: TaskIssue;
   snapshot: TasksSnapshot;
   patchIssue: (patch: IssuePatch) => Promise<boolean>;
+  onLabelCreated: (label: TaskLabel) => void;
 }) {
+  const checklist = taskProgress(issue.description);
   return (
     <div className="rounded-2xl border border-line bg-paper p-4">
       <div className="flex items-center justify-between">
@@ -508,11 +519,11 @@ function IssueProperties({
           <PropertySelect
             value={issue.assignee?.id ?? ''}
             options={[
-              { value: '', label: 'Unassigned' },
+              { value: '', label: 'Unassigned', icon: <span className="size-5 rounded-full border border-dashed border-line" /> },
               ...snapshot.members.map((member) => ({
                 value: member.id,
                 label: member.name,
-                icon: <Avatar name={member.name} color={member.avatarColor} size="xs" />,
+                icon: <Avatar name={member.name} color={member.avatarColor} size="2xs" />,
               })),
             ]}
             onChange={(value) => void patchIssue({ assigneeId: value || null })}
@@ -536,31 +547,21 @@ function IssueProperties({
 
         <div>
           <p className="text-[12px] font-medium text-muted">Labels</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {snapshot.labels.map((label) => {
-              const active = issue.labels.some((item) => item.id === label.id);
-              return (
-                <button
-                  key={label.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => {
-                    const next = active
-                      ? issue.labels.filter((item) => item.id !== label.id).map((item) => item.id)
-                      : [...issue.labels.map((item) => item.id), label.id];
-                    void patchIssue({ labelIds: next });
-                  }}
-                  className={cn(
-                    'inline-flex rounded-md transition-[box-shadow,transform] duration-150',
-                    active
-                      ? 'ring-2 ring-ink/25 ring-offset-2 ring-offset-paper'
-                      : 'opacity-75 hover:opacity-100',
-                  )}
-                >
-                  <TaskLabelPill label={label} />
-                </button>
-              );
-            })}
+          <div className="mt-2">
+            <LabelPicker
+              labels={snapshot.labels}
+              selectedIds={issue.labels.map((label) => label.id)}
+              slug={snapshot.workspace.slug}
+              issueId={issue.id}
+              onToggle={(labelId) => {
+                const active = issue.labels.some((item) => item.id === labelId);
+                const next = active
+                  ? issue.labels.filter((item) => item.id !== labelId).map((item) => item.id)
+                  : [...issue.labels.map((item) => item.id), labelId];
+                void patchIssue({ labelIds: next });
+              }}
+              onCreated={(label) => onLabelCreated(label)}
+            />
           </div>
         </div>
       </div>
@@ -569,6 +570,9 @@ function IssueProperties({
         <MetaRow label="Created" value={relativeTime(issue.createdAt)} />
         <MetaRow label="Updated" value={relativeTime(issue.updatedAt)} />
         <MetaRow label="Comments" value={String(issue.commentCount)} />
+        {checklist.total > 0 && (
+          <MetaRow label="Checklist" value={`${checklist.done} of ${checklist.total}`} />
+        )}
       </div>
     </div>
   );

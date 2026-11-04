@@ -420,7 +420,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     },
     {
       id: 'i-2', projectId: 'p-kora', number: 2, title: 'Add live presence to the Studio floor',
-      description: 'Show each person status and what they are doing. Poll every 3s until Durable Objects are available.',
+      description: 'Show each person status and what they are doing. Poll every 3s until Durable Objects are available.\n\n### Checklist\n- [x] Presence badges\n- [x] Live activity feed\n- [ ] Move polling to Durable Objects',
       status: 'in_progress', priority: 2, assigneeId: 'u-amina', createdAt: at(90), updatedAt: at(3),
     },
     {
@@ -430,12 +430,12 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     },
     {
       id: 'i-4', projectId: 'p-kora', number: 4, title: 'Tasks: list and board views',
-      description: 'List grouped by status with virtualized rows, plus a board. Status changes should be optimistic.',
+      description: 'List grouped by status with virtualized rows, plus a board. Status changes should be optimistic.\n\n### Checklist\n- [x] Virtualized list\n- [x] Board with drag and drop\n- [ ] Command menu\n- [ ] Keyboard shortcuts\n\nShip the **list** first, then reuse the status mutation for the board.',
       status: 'in_progress', priority: 2, assigneeId: 'u-alade', createdAt: at(80), updatedAt: at(2),
     },
     {
       id: 'i-5', projectId: 'p-kora', number: 5, title: 'Command menu for tasks',
-      description: 'Cmd K to create an issue, jump to a project, or move to chat or Studio.',
+      description: 'Cmd K to create an issue, jump to a project, or move to chat or Studio.\n\n- [x] Command menu shell\n- [x] Project actions\n- [ ] Create issue action\n\nUse `⌘K` on any task view.',
       status: 'todo', priority: 3, assigneeId: 'u-alade', createdAt: at(70), updatedAt: at(8),
     },
     {

@@ -1,13 +1,15 @@
-import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, redirect, useNavigate, useRouter } from '@tanstack/react-router';
 import { AlertCircle, ArrowLeft, Loader2, Menu, Plus } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
 import { createIssueFn, getTasksFn } from '../lib/tasks';
 import type { TaskPriority } from '../lib/types';
 import { Avatar } from '../components/avatar';
+import { LabelPicker } from '../components/label-picker';
+import { MarkdownEditor } from '../components/markdown-editor';
 import { PropertySelect } from '../components/property-select';
-import { PRIORITY_META, TaskLabelPill, TaskPriorityIcon, TaskStatusIcon } from '../components/task-icons';
+import { PRIORITY_META, TaskPriorityIcon, TaskStatusIcon } from '../components/task-icons';
 import { TasksSidebar } from '../components/tasks-sidebar';
 import { cn } from '../utils/cn';
 
@@ -33,6 +35,7 @@ function NewIssuePage() {
   const params = Route.useParams();
   const search = Route.useSearch();
   const navigate = useNavigate();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -53,16 +56,8 @@ function NewIssuePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const titleRef = useRef<HTMLInputElement>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
   const project = snapshot.projects.find((item) => item.id === projectId) ?? null;
-
-  useEffect(() => {
-    const element = descriptionRef.current;
-    if (!element) return;
-    element.style.height = '0px';
-    element.style.height = `${Math.min(520, Math.max(120, element.scrollHeight))}px`;
-  }, [description]);
 
   async function submit() {
     if (saving) return;
@@ -185,16 +180,14 @@ function NewIssuePage() {
                   </p>
                 )}
 
-                <textarea
-                  ref={descriptionRef}
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Add a description, context, or a link"
-                  rows={1}
-                  maxLength={8000}
-                  aria-label="Issue description"
-                  className="mt-6 min-h-[120px] w-full resize-none overflow-y-auto rounded-xl border border-line bg-paper px-4 py-3.5 text-[16px] leading-6 outline-none transition-[border-color,box-shadow] duration-150 ease-out focus:border-ink/25 focus:shadow-[0_0_0_3px_rgba(23,26,26,0.05)] sm:text-[14px]"
-                />
+                <div className="mt-6">
+                  <MarkdownEditor
+                    value={description}
+                    onChange={setDescription}
+                    placeholder="Write the issue in Markdown..."
+                    ariaLabel="Issue description"
+                  />
+                </div>
 
               </section>
 
@@ -236,7 +229,7 @@ function NewIssuePage() {
                       <PropertySelect
                         value={assigneeId}
                         options={[
-                          { value: '', label: 'Unassigned' },
+                          { value: '', label: 'Unassigned', icon: <span className="size-5 rounded-full border border-dashed border-line" /> },
                           ...snapshot.members.map((member) => ({
                             value: member.id,
                             label: member.name,
@@ -244,7 +237,7 @@ function NewIssuePage() {
                               <Avatar
                                 name={member.name}
                                 color={member.avatarColor}
-                                size="xs"
+                                size="2xs"
                               />
                             ),
                           })),
@@ -274,32 +267,25 @@ function NewIssuePage() {
 
                     <div>
                       <p className="text-[12px] font-medium text-muted">Labels</p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {snapshot.labels.map((label) => {
-                          const active = labelIds.includes(label.id);
-                          return (
-                            <button
-                              key={label.id}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() =>
-                                setLabelIds((current) =>
-                                  active
-                                    ? current.filter((id) => id !== label.id)
-                                    : [...current, label.id],
-                                )
-                              }
-                              className={cn(
-                                'inline-flex rounded-md transition-[box-shadow,transform] duration-150',
-                                active
-                                  ? 'ring-2 ring-ink/25 ring-offset-2 ring-offset-paper'
-                                  : 'opacity-75 hover:opacity-100',
-                              )}
-                            >
-                              <TaskLabelPill label={label} />
-                            </button>
-                          );
-                        })}
+                      <div className="mt-2">
+                        <LabelPicker
+                          labels={snapshot.labels}
+                          selectedIds={labelIds}
+                          slug={snapshot.workspace.slug}
+                          onToggle={(labelId) =>
+                            setLabelIds((current) =>
+                              current.includes(labelId)
+                                ? current.filter((id) => id !== labelId)
+                                : [...current, labelId],
+                            )
+                          }
+                          onCreated={async (label) => {
+                            setLabelIds((current) =>
+                              current.includes(label.id) ? current : [...current, label.id],
+                            );
+                            await router.invalidate();
+                          }}
+                        />
                       </div>
                     </div>
                   </div>

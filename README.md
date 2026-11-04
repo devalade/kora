@@ -35,6 +35,8 @@ huddles move between them.
 - One-click huddles with camera, microphone, screen share, mute, and a participant grid
 - Studio virtual office with rooms, live presence, activity feed, and room huddles
 - Linear-style tasks with a virtualized list, board, full issue pages, a dedicated new issue page, comments, optimistic updates, and keyboard navigation
+- Markdown issue descriptions with a live preview, clickable task lists, and checklist progress in the list and board
+- Quick-add rows for new issues and inline label creation, both with Enter to submit
 - A workspace workflow editor for adding, renaming, recoloring, reordering, and deleting custom statuses
 - Email and password accounts with hashed passwords and HttpOnly sessions
 - Responsive app shell with a mobile navigation drawer

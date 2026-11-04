@@ -43,3 +43,12 @@ export const DEFAULT_TASK_STATUSES: DefaultTaskStatus[] = [
   { id: 'done', name: 'Done', category: 'completed', color: '#17795f', position: 4 },
   { id: 'canceled', name: 'Canceled', category: 'canceled', color: '#a19b8f', position: 5 },
 ];
+
+export const TASK_LABEL_COLORS = [
+  '#D84A2B',
+  '#B07AA1',
+  '#5B8DEF',
+  '#18A999',
+  '#E0A23B',
+  '#D45D79',
+] as const;

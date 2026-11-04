@@ -1,9 +1,11 @@
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import {
+  ArrowUpRight,
   Columns3,
   Command,
   List,
+  ListChecks,
   Loader2,
   Menu,
   MessageSquare,
@@ -14,7 +16,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
-import { getTasksFn, updateIssueFn } from '../lib/tasks';
+import { createIssueFn, getTasksFn, updateIssueFn } from '../lib/tasks';
 import type { TaskIssue, TaskStatus, TasksSnapshot } from '../lib/types';
 import {
   validateTasksSearch,
@@ -23,6 +25,7 @@ import {
   type TasksView,
 } from '../lib/tasks-search';
 import { relativeTime } from '../lib/format';
+import { taskProgress } from '../lib/markdown';
 import { Avatar } from '../components/avatar';
 import { TaskCommandMenu } from '../components/task-command-menu';
 import {
@@ -47,6 +50,7 @@ export const Route = createFileRoute('/app/$workspaceSlug/tasks/')({
 
 type ListItem =
   | { type: 'group'; status: TaskStatus; count: number }
+  | { type: 'quick-add'; status: TaskStatus }
   | { type: 'issue'; issue: TaskIssue };
 
 function TasksPage() {
@@ -59,6 +63,7 @@ function TasksPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [quickAddStatus, setQuickAddStatus] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const requestRef = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -99,20 +104,36 @@ function TasksPage() {
         status,
         issues: filtered.filter((issue) => issue.status.id === status.id),
       }))
-      .filter((group) => group.issues.length > 0);
+      .filter(
+        (group) => group.issues.length > 0 || quickAddStatus === group.status.id,
+      );
     return groups.flatMap((group): ListItem[] => [
       { type: 'group', status: group.status, count: group.issues.length },
+      ...(quickAddStatus === group.status.id
+        ? [{ type: 'quick-add' as const, status: group.status }]
+        : []),
       ...group.issues.map((issue): ListItem => ({ type: 'issue', issue })),
     ]);
-  }, [filtered, snapshot.statuses]);
+  }, [filtered, quickAddStatus, snapshot.statuses]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: grouped.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (index) => (grouped[index]?.type === 'group' ? 40 : 48),
+    estimateSize: (index) => {
+      const item = grouped[index];
+      return item?.type === 'group' ? 40 : item?.type === 'quick-add' ? 56 : 48;
+    },
     overscan: 10,
   });
+
+  useEffect(() => {
+    if (!quickAddStatus) return;
+    const index = grouped.findIndex(
+      (item) => item.type === 'quick-add' && item.status.id === quickAddStatus,
+    );
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' });
+  }, [grouped, quickAddStatus, virtualizer]);
 
   const loadSnapshot = useCallback(async () => {
     const request = ++requestRef.current;
@@ -261,6 +282,7 @@ function TasksPage() {
         setCommandOpen(false);
         setSidebarOpen(false);
         setFocusedId(null);
+        setQuickAddStatus(null);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -494,7 +516,14 @@ function TasksPage() {
             focusedId={focusedId}
             workspaceSlug={params.workspaceSlug}
             projectFilter={projectFilter}
+            projectId={projectFilter ?? snapshot.projects[0]?.id ?? ''}
             statusFilter={statusFilter}
+            quickAddStatus={quickAddStatus}
+            onQuickAdd={(statusId) =>
+              setQuickAddStatus((current) => (current === statusId ? null : statusId))
+            }
+            onQuickAddCancel={() => setQuickAddStatus(null)}
+            onQuickAddCreated={loadSnapshot}
             empty={filtered.length === 0}
             hasFilters={hasFilters}
             onClearFilters={() => {
@@ -585,7 +614,12 @@ function IssueList({
   focusedId,
   workspaceSlug,
   projectFilter,
+  projectId,
   statusFilter,
+  quickAddStatus,
+  onQuickAdd,
+  onQuickAddCancel,
+  onQuickAddCreated,
   empty,
   hasFilters,
   onClearFilters,
@@ -597,7 +631,12 @@ function IssueList({
   focusedId: string | null;
   workspaceSlug: string;
   projectFilter?: string;
+  projectId: string;
   statusFilter?: string;
+  quickAddStatus: string | null;
+  onQuickAdd: (statusId: string) => void;
+  onQuickAddCancel: () => void;
+  onQuickAddCreated: () => Promise<void>;
   empty: boolean;
   hasFilters: boolean;
   onClearFilters: () => void;
@@ -658,15 +697,35 @@ function IssueList({
                 <TaskStatusIcon status={item.status} size={15} />
                 <span className="text-[13px] font-semibold">{item.status.name}</span>
                 <span className="text-[11px] tabular-nums text-faint">{item.count}</span>
-                <Link
-                  to="/app/$workspaceSlug/tasks/new"
-                  params={{ workspaceSlug }}
-                  search={{ project: projectFilter, status: item.status.id }}
-                  className="ml-auto grid size-7 place-items-center rounded-md text-faint transition-colors duration-150 hover:bg-line-soft hover:text-ink"
-                  aria-label={`New ${item.status.name} issue`}
+                <button
+                  type="button"
+                  onClick={() => onQuickAdd(item.status.id)}
+                  className={cn(
+                    'ml-auto grid size-7 place-items-center rounded-md transition-colors duration-150 hover:bg-line-soft hover:text-ink',
+                    quickAddStatus === item.status.id ? 'bg-line-soft text-ink' : 'text-faint',
+                  )}
+                  aria-label={`Quick add ${item.status.name} issue`}
                 >
                   <Plus size={14} />
-                </Link>
+                </button>
+              </div>
+            );
+          }
+
+          if (item.type === 'quick-add') {
+            return (
+              <div
+                key={`quick-${item.status.id}`}
+                className="absolute top-0 left-0 w-full"
+                style={{ height: virtualItem.size, transform: `translateY(${virtualItem.start}px)` }}
+              >
+                <QuickAddRow
+                  status={item.status}
+                  workspaceSlug={workspaceSlug}
+                  projectId={projectId}
+                  onCreated={onQuickAddCreated}
+                  onCancel={onQuickAddCancel}
+                />
               </div>
             );
           }
@@ -701,6 +760,10 @@ function IssueList({
                     <MessageSquare size={12} /> {issue.commentCount}
                   </span>
                 )}
+                <ChecklistBadge
+                  description={issue.description}
+                  className="hidden text-[11px] sm:flex"
+                />
                 <span className="hidden w-12 text-right text-[11px] text-faint sm:block">
                   {relativeTime(issue.updatedAt)}
                 </span>
@@ -718,6 +781,125 @@ function IssueList({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ChecklistBadge({
+  description,
+  className,
+}: {
+  description: string;
+  className?: string;
+}) {
+  const progress = taskProgress(description);
+  if (progress.total === 0) return null;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 tabular-nums',
+        progress.done === progress.total ? 'text-mint-deep' : 'text-faint',
+        className,
+      )}
+    >
+      <ListChecks size={12} />
+      {progress.done}/{progress.total}
+    </span>
+  );
+}
+
+function QuickAddRow({
+  status,
+  workspaceSlug,
+  projectId,
+  onCreated,
+  onCancel,
+}: {
+  status: TaskStatus;
+  workspaceSlug: string;
+  projectId: string;
+  onCreated: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  async function submit() {
+    const next = title.trim();
+    if (!next || saving) return;
+    if (!projectId) {
+      toast.error('Create a project before adding an issue.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const result = await createIssueFn({
+        data: {
+          slug: workspaceSlug,
+          projectId,
+          title: next,
+          statusId: status.id,
+          description: '',
+          priority: 0,
+          assigneeId: null,
+          labelIds: [],
+        },
+      });
+      setTitle('');
+      toast.success(`${result.key} created.`);
+      await onCreated();
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not create the issue.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex h-14 items-center gap-2 border-b border-line-soft bg-paper px-4 sm:px-6">
+      <TaskStatusIcon status={status} size={16} />
+      <input
+        ref={inputRef}
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            void submit();
+          } else if (event.key === 'Escape') {
+            onCancel();
+          }
+        }}
+        placeholder={`Add to ${status.name}`}
+        maxLength={200}
+        aria-label={`New ${status.name} issue title`}
+        className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-canvas px-3 text-[16px] outline-none transition-[border-color,box-shadow] duration-150 focus:border-ink/25 focus:shadow-[0_0_0_3px_rgba(23,26,26,0.05)] sm:h-9 sm:text-[13px]"
+      />
+      <Link
+        to="/app/$workspaceSlug/tasks/new"
+        params={{ workspaceSlug }}
+        search={{ project: projectId || undefined, status: status.id }}
+        className="grid size-10 place-items-center rounded-lg text-faint transition-colors duration-150 hover:bg-line-soft hover:text-ink sm:size-9"
+        aria-label="Open the full issue page"
+        title="Open the full issue page"
+      >
+        <ArrowUpRight size={15} />
+      </Link>
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={!title.trim() || saving}
+        className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-coral px-3 text-[12px] font-semibold text-white transition-[background-color,opacity] duration-150 hover:bg-coral-deep disabled:opacity-40 sm:h-9"
+      >
+        {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+        Add
+      </button>
     </div>
   );
 }
@@ -804,11 +986,14 @@ function BoardView({
                   <p className="mt-1.5 line-clamp-2 text-[13px] leading-[1.4] font-medium">
                     {issue.title}
                   </p>
-                  <div className="mt-2 flex items-center gap-1.5">
-                    {issue.labels.slice(0, 2).map((label) => (
-                      <TaskLabelPill key={label.id} label={label} />
-                    ))}
-                    <span className="ml-auto">
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {issue.labels.slice(0, 2).map((label) => (
+                        <TaskLabelPill key={label.id} label={label} />
+                      ))}
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-2">
+                      <ChecklistBadge description={issue.description} className="text-[11px]" />
                       {issue.assignee ? (
                         <Avatar
                           name={issue.assignee.name}
