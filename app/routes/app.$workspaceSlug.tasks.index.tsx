@@ -70,6 +70,9 @@ function TasksPage() {
   const [quickAddStatus, setQuickAddStatus] = useState<string | null>(null);
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(new Set());
   const [collapseStateLoaded, setCollapseStateLoaded] = useState(false);
+  // Extra room below the virtual list so collapsing a group near the bottom keeps
+  // its header under the pointer instead of letting the browser clamp the scroll.
+  const [bottomSpace, setBottomSpace] = useState(0);
   const [justMovedId, setJustMovedId] = useState<string | null>(null);
   const justMovedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -277,7 +280,22 @@ function TasksPage() {
     }
   }
 
+  function anchorHeightChange(delta: number) {
+    const container = parentRef.current;
+    if (!container) return;
+    const nextTotal = virtualizer.getTotalSize() + delta;
+    setBottomSpace(Math.max(0, container.scrollTop + container.clientHeight - nextTotal));
+  }
+
   function toggleGroup(statusId: string) {
+    const isCollapsing = !collapsedStatuses.has(statusId);
+    const issueCount = filtered.filter((issue) => issue.status.id === statusId).length;
+    const quickAddHeight = quickAddStatus === statusId ? 56 : 0;
+    anchorHeightChange(
+      isCollapsing
+        ? -(issueCount * 48 + quickAddHeight)
+        : issueCount * 48,
+    );
     setCollapsedStatuses((current) => {
       const next = new Set(current);
       if (next.has(statusId)) next.delete(statusId);
@@ -288,6 +306,15 @@ function TasksPage() {
   }
 
   function openQuickAdd(statusId: string) {
+    const isClosing = quickAddStatus === statusId;
+    const isSwitching = quickAddStatus !== null && quickAddStatus !== statusId;
+    const isCollapsed = collapsedStatuses.has(statusId);
+    const issueCount = filtered.filter((issue) => issue.status.id === statusId).length;
+    anchorHeightChange(
+      isClosing
+        ? -56
+        : (isCollapsed ? issueCount * 48 : 0) + (isSwitching ? 0 : 56),
+    );
     setCollapsedStatuses((current) => {
       if (!current.has(statusId)) return current;
       const next = new Set(current);
@@ -604,6 +631,8 @@ function TasksPage() {
             statusFilter={statusFilter}
             quickAddStatus={quickAddStatus}
             collapsedStatuses={collapsedStatuses}
+            bottomSpace={bottomSpace}
+            onBottomSpaceChange={setBottomSpace}
             justMovedId={justMovedId}
             onToggleGroup={toggleGroup}
             onQuickAdd={openQuickAdd}
@@ -704,6 +733,8 @@ function IssueList({
   statusFilter,
   quickAddStatus,
   collapsedStatuses,
+  bottomSpace,
+  onBottomSpaceChange,
   justMovedId,
   onToggleGroup,
   onQuickAdd,
@@ -725,6 +756,8 @@ function IssueList({
   statusFilter?: string;
   quickAddStatus: string | null;
   collapsedStatuses: Set<string>;
+  bottomSpace: number;
+  onBottomSpaceChange: (value: number) => void;
   justMovedId: string | null;
   onToggleGroup: (statusId: string) => void;
   onQuickAdd: (statusId: string) => void;
@@ -782,6 +815,12 @@ function IssueList({
     <div
       ref={parentRef}
       className="scroll-thin min-h-0 flex-1 overflow-auto"
+      onScroll={(event) => {
+        if (bottomSpace === 0) return;
+        if (event.currentTarget.scrollTop <= virtualizer.getTotalSize() - event.currentTarget.clientHeight) {
+          onBottomSpaceChange(0);
+        }
+      }}
       onDragOver={(event) => {
         if (!draggingId) return;
         const rect = event.currentTarget.getBoundingClientRect();
@@ -789,7 +828,7 @@ function IssueList({
         else if (event.clientY > rect.bottom - 56) event.currentTarget.scrollBy({ top: 12 });
       }}
     >
-      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() + bottomSpace }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const item = items[virtualItem.index];
           if (!item) return null;
