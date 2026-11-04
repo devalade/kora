@@ -6,6 +6,7 @@ import {
   issues,
   labels,
   projects,
+  taskStatuses,
   users,
   workspaceMembers,
   workspaces,
@@ -15,25 +16,35 @@ import { newId } from './ids';
 import { toUserSummary } from './people';
 import { memberUsers, requireWorkspace, touchPresence } from './server';
 import { readSessionUser } from './session';
+import {
+  DEFAULT_TASK_STATUSES,
+  TASK_STATUS_CATEGORIES,
+} from './task-config';
 import type {
   TaskComment,
   TaskIssue,
+  TaskIssueDetail,
   TaskLabel,
   TaskPriority,
   TaskProject,
   TaskStatus,
+  TaskStatusCategory,
   TasksSnapshot,
 } from './types';
 
-const STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'canceled'] as const;
 const PRIORITIES = [0, 1, 2, 3, 4] as const;
+const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a six digit hex color.');
 
 const issueSelection = {
   id: issues.id,
   number: issues.number,
   title: issues.title,
   description: issues.description,
-  status: issues.status,
+  statusId: issues.status,
+  statusName: taskStatuses.name,
+  statusCategory: taskStatuses.category,
+  statusColor: taskStatuses.color,
+  statusPosition: taskStatuses.position,
   priority: issues.priority,
   projectId: issues.projectId,
   projectName: projects.name,
@@ -56,7 +67,11 @@ type IssueRow = {
   number: number;
   title: string;
   description: string;
-  status: string;
+  statusId: string;
+  statusName: string;
+  statusCategory: string;
+  statusColor: string;
+  statusPosition: number;
   priority: number;
   projectId: string;
   projectName: string;
@@ -74,6 +89,62 @@ type IssueRow = {
   updatedAt: string;
 };
 
+function statusCategory(value: string): TaskStatusCategory {
+  return TASK_STATUS_CATEGORIES.includes(value as TaskStatusCategory)
+    ? (value as TaskStatusCategory)
+    : 'unstarted';
+}
+
+function toStatus(row: {
+  id: string;
+  name: string;
+  category: string;
+  color: string;
+  position: number;
+}): TaskStatus {
+  return {
+    id: row.id,
+    name: row.name,
+    category: statusCategory(row.category),
+    color: row.color,
+    position: row.position,
+  };
+}
+
+async function ensureTaskStatuses(workspaceId: string) {
+  const existing = await db
+    .select()
+    .from(taskStatuses)
+    .where(eq(taskStatuses.workspaceId, workspaceId))
+    .orderBy(asc(taskStatuses.position), asc(taskStatuses.createdAt));
+  if (existing.length > 0) return existing.map(toStatus);
+
+  await db
+    .insert(taskStatuses)
+    .values(
+      DEFAULT_TASK_STATUSES.map((status) => ({
+        ...status,
+        workspaceId,
+      })),
+    )
+    .onConflictDoNothing();
+
+  const created = await db
+    .select()
+    .from(taskStatuses)
+    .where(eq(taskStatuses.workspaceId, workspaceId))
+    .orderBy(asc(taskStatuses.position), asc(taskStatuses.createdAt));
+  return created.map(toStatus);
+}
+
+async function workspaceForSlug(slug: string, userId: string) {
+  const [workspace] = await db.select().from(workspaces).where(eq(workspaces.slug, slug));
+  if (!workspace) throw new Error('Workspace not found.');
+  const membership = await requireWorkspace(workspace.id, userId);
+  const statuses = await ensureTaskStatuses(workspace.id);
+  return { workspace, membership, statuses };
+}
+
 function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: number): TaskIssue {
   return {
     id: row.id,
@@ -81,7 +152,13 @@ function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: numb
     number: row.number,
     title: row.title,
     description: row.description,
-    status: STATUSES.includes(row.status as TaskStatus) ? (row.status as TaskStatus) : 'todo',
+    status: {
+      id: row.statusId,
+      name: row.statusName,
+      category: statusCategory(row.statusCategory),
+      color: row.statusColor,
+      position: row.statusPosition,
+    },
     priority: (PRIORITIES.includes(row.priority as TaskPriority) ? row.priority : 0) as TaskPriority,
     project: {
       id: row.projectId,
@@ -150,14 +227,105 @@ async function requireIssue(issueId: string, userId: string) {
   return row;
 }
 
+function parseIssueKey(key: string) {
+  const separator = key.lastIndexOf('-');
+  if (separator < 1) throw new Error('Issue not found.');
+  const projectKey = key.slice(0, separator);
+  const number = Number(key.slice(separator + 1));
+  if (!Number.isInteger(number) || number < 1) throw new Error('Issue not found.');
+  return { projectKey, number };
+}
+
+async function issueRowByKey(workspaceId: string, issueKey: string) {
+  const { projectKey, number } = parseIssueKey(issueKey);
+  const [project] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.workspaceId, workspaceId), eq(projects.key, projectKey)));
+  if (!project) throw new Error('Issue not found.');
+  const [row] = await db
+    .select(issueSelection)
+    .from(issues)
+    .innerJoin(projects, eq(projects.id, issues.projectId))
+    .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+    .leftJoin(users, eq(users.id, issues.assigneeId))
+    .where(
+      and(
+        eq(issues.workspaceId, workspaceId),
+        eq(issues.projectId, project.id),
+        eq(issues.number, number),
+      ),
+    );
+  if (!row) throw new Error('Issue not found.');
+  return row;
+}
+
+function toComment(row: {
+  id: string;
+  body: string;
+  createdAt: string;
+  authorId: string;
+  authorName: string;
+  authorEmail: string;
+  authorAvatarColor: string;
+  authorTitle: string;
+  authorStatusEmoji: string;
+  authorStatusText: string;
+  authorLastSeenAt: string;
+}): TaskComment {
+  return {
+    id: row.id,
+    body: row.body,
+    createdAt: row.createdAt,
+    author: toUserSummary({
+      id: row.authorId,
+      name: row.authorName,
+      email: row.authorEmail,
+      avatarColor: row.authorAvatarColor,
+      title: row.authorTitle,
+      statusEmoji: row.authorStatusEmoji,
+      statusText: row.authorStatusText,
+      lastSeenAt: row.authorLastSeenAt,
+    }),
+  };
+}
+
+async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
+  const [labelMap, commentMap, commentRows] = await Promise.all([
+    issueLabelsFor([row.id]),
+    commentCountsFor([row.id]),
+    db
+      .select({
+        id: issueComments.id,
+        body: issueComments.body,
+        createdAt: issueComments.createdAt,
+        authorId: users.id,
+        authorName: users.name,
+        authorEmail: users.email,
+        authorAvatarColor: users.avatarColor,
+        authorTitle: users.title,
+        authorStatusEmoji: users.statusEmoji,
+        authorStatusText: users.statusText,
+        authorLastSeenAt: users.lastSeenAt,
+      })
+      .from(issueComments)
+      .innerJoin(users, eq(users.id, issueComments.userId))
+      .where(eq(issueComments.issueId, row.id))
+      .orderBy(asc(issueComments.createdAt)),
+  ]);
+
+  return {
+    issue: toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
+    comments: commentRows.map(toComment),
+  };
+}
+
 export const getTasksFn = createServerFn({ method: 'GET' })
   .validator(z.object({ slug: z.string() }))
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.slug, data.slug));
-    if (!workspace) throw new Error('Workspace not found.');
-    const membership = await requireWorkspace(workspace.id, me.id);
+    const { workspace, membership, statuses } = await workspaceForSlug(data.slug, me.id);
     await touchPresence(me.id);
 
     const [projectRows, labelRows, members, issueRows] = await Promise.all([
@@ -172,10 +340,11 @@ export const getTasksFn = createServerFn({ method: 'GET' })
         .select(issueSelection)
         .from(issues)
         .innerJoin(projects, eq(projects.id, issues.projectId))
+        .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
         .leftJoin(users, eq(users.id, issues.assigneeId))
         .where(eq(issues.workspaceId, workspace.id))
         .orderBy(desc(issues.updatedAt))
-        .limit(300),
+        .limit(500),
     ]);
 
     const ids = issueRows.map((row) => row.id);
@@ -200,17 +369,12 @@ export const getTasksFn = createServerFn({ method: 'GET' })
       issueCount: projectCounts.get(project.id) ?? 0,
     }));
 
-    const byStatus = Object.fromEntries(STATUSES.map((status) => [status, 0])) as Record<
-      TaskStatus,
-      number
-    >;
-    for (const issue of issueViews) byStatus[issue.status] += 1;
-
-    const counts = {
-      all: issueViews.length,
-      mine: issueViews.filter((issue) => issue.assignee?.id === me.id).length,
-      byStatus,
-    };
+    const byStatus: Record<string, number> = Object.fromEntries(
+      statuses.map((status) => [status.id, 0]),
+    );
+    for (const issue of issueViews) {
+      byStatus[issue.status.id] = (byStatus[issue.status.id] ?? 0) + 1;
+    }
 
     return {
       workspace: {
@@ -223,68 +387,25 @@ export const getTasksFn = createServerFn({ method: 'GET' })
       me,
       projects: projectsView,
       labels: labelRows.map((label) => ({ id: label.id, name: label.name, color: label.color })),
+      statuses,
       members,
       issues: issueViews,
-      counts,
+      counts: {
+        all: issueViews.length,
+        mine: issueViews.filter((issue) => issue.assignee?.id === me.id).length,
+        byStatus,
+      },
     } satisfies TasksSnapshot;
   });
 
 export const getIssueFn = createServerFn({ method: 'GET' })
-  .validator(z.object({ issueId: z.string() }))
+  .validator(z.object({ slug: z.string(), issueKey: z.string() }))
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    await requireIssue(data.issueId, me.id);
-    const [issueRow] = await db
-      .select(issueSelection)
-      .from(issues)
-      .innerJoin(projects, eq(projects.id, issues.projectId))
-      .leftJoin(users, eq(users.id, issues.assigneeId))
-      .where(eq(issues.id, data.issueId));
-    if (!issueRow) throw new Error('Issue not found.');
-    const [labelMap, commentMap, commentRows] = await Promise.all([
-      issueLabelsFor([issueRow.id]),
-      commentCountsFor([issueRow.id]),
-      db
-        .select({
-          id: issueComments.id,
-          body: issueComments.body,
-          createdAt: issueComments.createdAt,
-          authorId: users.id,
-          authorName: users.name,
-          authorEmail: users.email,
-          authorAvatarColor: users.avatarColor,
-          authorTitle: users.title,
-          authorStatusEmoji: users.statusEmoji,
-          authorStatusText: users.statusText,
-          authorLastSeenAt: users.lastSeenAt,
-        })
-        .from(issueComments)
-        .innerJoin(users, eq(users.id, issueComments.userId))
-        .where(eq(issueComments.issueId, issueRow.id))
-        .orderBy(asc(issueComments.createdAt)),
-    ]);
-
-    const comments: TaskComment[] = commentRows.map((row) => ({
-      id: row.id,
-      body: row.body,
-      createdAt: row.createdAt,
-      author: toUserSummary({
-        id: row.authorId,
-        name: row.authorName,
-        email: row.authorEmail,
-        avatarColor: row.authorAvatarColor,
-        title: row.authorTitle,
-        statusEmoji: row.authorStatusEmoji,
-        statusText: row.authorStatusText,
-        lastSeenAt: row.authorLastSeenAt,
-      }),
-    }));
-
-    return {
-      issue: toIssue(issueRow, labelMap.get(issueRow.id) ?? [], commentMap.get(issueRow.id) ?? 0),
-      comments,
-    };
+    const { workspace } = await workspaceForSlug(data.slug, me.id);
+    const row = await issueRowByKey(workspace.id, data.issueKey);
+    return issueDetail(row);
   });
 
 export const createIssueFn = createServerFn({ method: 'POST' })
@@ -294,7 +415,7 @@ export const createIssueFn = createServerFn({ method: 'POST' })
       projectId: z.string(),
       title: z.string().trim().min(1, 'Give the issue a title').max(200),
       description: z.string().max(8000).default(''),
-      status: z.enum(STATUSES).default('todo'),
+      statusId: z.string().optional(),
       priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(0),
       assigneeId: z.string().nullable().optional(),
       labelIds: z.array(z.string()).default([]),
@@ -303,14 +424,17 @@ export const createIssueFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.slug, data.slug));
-    if (!workspace) throw new Error('Workspace not found.');
-    await requireWorkspace(workspace.id, me.id);
+    const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
     const [project] = await db
       .select()
       .from(projects)
       .where(and(eq(projects.id, data.projectId), eq(projects.workspaceId, workspace.id)));
     if (!project) throw new Error('Project not found.');
+
+    const status = data.statusId
+      ? statuses.find((item) => item.id === data.statusId)
+      : statuses.find((item) => item.category === 'unstarted') ?? statuses[0];
+    if (!status) throw new Error('Create a workflow status first.');
 
     if (data.assigneeId) {
       const member = await db
@@ -338,7 +462,7 @@ export const createIssueFn = createServerFn({ method: 'POST' })
       number,
       title: data.title,
       description: data.description,
-      status: data.status,
+      status: status.id,
       priority: data.priority,
       assigneeId: data.assigneeId ?? null,
       createdBy: me.id,
@@ -366,7 +490,7 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
       issueId: z.string(),
       title: z.string().trim().min(1).max(200).optional(),
       description: z.string().max(8000).optional(),
-      status: z.enum(STATUSES).optional(),
+      statusId: z.string().optional(),
       priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
       assigneeId: z.string().nullable().optional(),
       labelIds: z.array(z.string()).optional(),
@@ -388,11 +512,23 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
         );
       if (member.length === 0) throw new Error('Pick a teammate in this workspace.');
     }
+    if (data.statusId) {
+      const [status] = await db
+        .select({ id: taskStatuses.id })
+        .from(taskStatuses)
+        .where(
+          and(
+            eq(taskStatuses.workspaceId, issue.workspaceId),
+            eq(taskStatuses.id, data.statusId),
+          ),
+        );
+      if (!status) throw new Error('Pick a status in this workspace.');
+    }
 
     const set: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     if (data.title !== undefined) set.title = data.title;
     if (data.description !== undefined) set.description = data.description;
-    if (data.status !== undefined) set.status = data.status;
+    if (data.statusId !== undefined) set.status = data.statusId;
     if (data.priority !== undefined) set.priority = data.priority;
     if (data.assigneeId !== undefined) set.assigneeId = data.assigneeId;
     await db.update(issues).set(set).where(eq(issues.id, data.issueId));
@@ -461,21 +597,152 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
       .from(issueComments)
       .innerJoin(users, eq(users.id, issueComments.userId))
       .where(eq(issueComments.id, commentId));
+    return { comment: toComment(row) };
+  });
+
+export const createTaskStatusFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      slug: z.string(),
+      name: z.string().trim().min(1, 'Give the status a name').max(32),
+      category: z.enum(TASK_STATUS_CATEGORIES),
+      color: colorSchema,
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
+    const duplicate = statuses.some(
+      (status) => status.name.toLowerCase() === data.name.toLowerCase(),
+    );
+    if (duplicate) throw new Error('A status with that name already exists.');
+    const id = newId();
+    const position = statuses.reduce((max, status) => Math.max(max, status.position), -1) + 1;
+    await db.insert(taskStatuses).values({
+      id,
+      workspaceId: workspace.id,
+      name: data.name,
+      category: data.category,
+      color: data.color,
+      position,
+    });
     return {
-      comment: {
-        id: row.id,
-        body: row.body,
-        createdAt: row.createdAt,
-        author: toUserSummary({
-          id: row.authorId,
-          name: row.authorName,
-          email: row.authorEmail,
-          avatarColor: row.authorAvatarColor,
-          title: row.authorTitle,
-          statusEmoji: row.authorStatusEmoji,
-          statusText: row.authorStatusText,
-          lastSeenAt: row.authorLastSeenAt,
-        }),
-      } satisfies TaskComment,
+      status: {
+        id,
+        name: data.name,
+        category: data.category,
+        color: data.color,
+        position,
+      } satisfies TaskStatus,
     };
+  });
+
+export const updateTaskStatusFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      statusId: z.string(),
+      name: z.string().trim().min(1).max(32).optional(),
+      category: z.enum(TASK_STATUS_CATEGORIES).optional(),
+      color: colorSchema.optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const [status] = await db.select().from(taskStatuses).where(eq(taskStatuses.id, data.statusId));
+    if (!status) throw new Error('Status not found.');
+    await requireWorkspace(status.workspaceId, me.id);
+    if (data.name && data.name.toLowerCase() !== status.name.toLowerCase()) {
+      const rows = await db
+        .select({ id: taskStatuses.id, name: taskStatuses.name })
+        .from(taskStatuses)
+        .where(eq(taskStatuses.workspaceId, status.workspaceId));
+      if (rows.some((row) => row.name.toLowerCase() === data.name?.toLowerCase())) {
+        throw new Error('A status with that name already exists.');
+      }
+    }
+    const set: Record<string, unknown> = {};
+    if (data.name !== undefined) set.name = data.name;
+    if (data.category !== undefined) set.category = data.category;
+    if (data.color !== undefined) set.color = data.color;
+    if (Object.keys(set).length > 0) {
+      await db.update(taskStatuses).set(set).where(eq(taskStatuses.id, data.statusId));
+    }
+    return { ok: true as const };
+  });
+
+export const reorderTaskStatusesFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ slug: z.string(), statusIds: z.array(z.string()).min(1) }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
+    const currentIds = new Set(statuses.map((status) => status.id));
+    if (
+      data.statusIds.length !== statuses.length ||
+      data.statusIds.some((id) => !currentIds.has(id))
+    ) {
+      throw new Error('The workflow changed. Refresh and try again.');
+    }
+    await Promise.all(
+      data.statusIds.map((id, index) =>
+        db
+          .update(taskStatuses)
+          .set({ position: index })
+          .where(
+            and(eq(taskStatuses.id, id), eq(taskStatuses.workspaceId, workspace.id)),
+          ),
+      ),
+    );
+    return { ok: true as const };
+  });
+
+export const deleteTaskStatusFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      statusId: z.string(),
+      moveToStatusId: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const [status] = await db.select().from(taskStatuses).where(eq(taskStatuses.id, data.statusId));
+    if (!status) throw new Error('Status not found.');
+    await requireWorkspace(status.workspaceId, me.id);
+
+    const rows = await db
+      .select()
+      .from(taskStatuses)
+      .where(eq(taskStatuses.workspaceId, status.workspaceId));
+    if (rows.length <= 1) throw new Error('Keep at least one workflow status.');
+    if (data.moveToStatusId === status.id) {
+      throw new Error('Pick a different status to move issues to.');
+    }
+
+    const [countRow] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(issues)
+      .where(
+        and(eq(issues.workspaceId, status.workspaceId), eq(issues.status, status.id)),
+      );
+    const count = Number(countRow?.count ?? 0);
+
+    if (count > 0) {
+      if (!data.moveToStatusId) {
+        throw new Error(`Move ${count} ${count === 1 ? 'issue' : 'issues'} to another status first.`);
+      }
+      const target = rows.find((row) => row.id === data.moveToStatusId);
+      if (!target) throw new Error('Pick a status in this workspace.');
+      await db
+        .update(issues)
+        .set({ status: target.id, updatedAt: new Date().toISOString() })
+        .where(
+          and(eq(issues.workspaceId, status.workspaceId), eq(issues.status, status.id)),
+        );
+    }
+
+    await db.delete(taskStatuses).where(eq(taskStatuses.id, status.id));
+    return { moved: count };
   });

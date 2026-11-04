@@ -3,8 +3,8 @@
 Live: https://kora.zecreator.com
 
 Kora is a Slack-style team chat app built with Void and TanStack Start on Cloudflare. It has
-workspaces, channels, direct messages, threads, reactions, file attachments, search, presence, and
-one-click video huddles.
+workspaces, channels, direct messages, threads, reactions, file attachments, search, presence,
+video huddles, and a full task workflow.
 
 The app runs locally with one command and deploys to a Cloudflare account with Void. The production
 target is D1 for relational data, R2 for files, and Workers for every request.
@@ -34,7 +34,8 @@ huddles move between them.
 - Presence, typing indicators, unread badges, and per-channel read state
 - One-click huddles with camera, microphone, screen share, mute, and a participant grid
 - Studio virtual office with rooms, live presence, activity feed, and room huddles
-- Linear-style tasks with a virtualized list, board, command menu, comments, optimistic updates, and keyboard navigation
+- Linear-style tasks with a virtualized list, board, full issue pages, a dedicated new issue page, comments, optimistic updates, and keyboard navigation
+- A workspace workflow editor for adding, renaming, recoloring, reordering, and deleting custom statuses
 - Email and password accounts with hashed passwords and HttpOnly sessions
 - Responsive app shell with a mobile navigation drawer
 

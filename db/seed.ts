@@ -1,5 +1,6 @@
 import { defineSeed } from 'void/seed';
 import { hashPassword } from '../app/lib/password';
+import { DEFAULT_TASK_STATUSES } from '../app/lib/task-config';
 
 export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
   const passwordHash = await hashPassword('demo1234');
@@ -370,6 +371,14 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       createdAt: at(8),
     },
   ]);
+
+  await db.insert(schema.taskStatuses).values(
+    DEFAULT_TASK_STATUSES.map((status) => ({
+      ...status,
+      workspaceId: 'ws-kora',
+      createdAt: at(60 * 24 * 9),
+    })),
+  );
 
   await db.insert(schema.projects).values([
     {

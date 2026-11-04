@@ -140,7 +140,14 @@ export type OfficeSnapshot = {
   call: CallView | null;
 };
 
-export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'canceled';
+export type TaskStatusCategory = 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled';
+export type TaskStatus = {
+  id: string;
+  name: string;
+  category: TaskStatusCategory;
+  color: string;
+  position: number;
+};
 export type TaskPriority = 0 | 1 | 2 | 3 | 4;
 
 export type TaskProject = {
@@ -186,12 +193,13 @@ export type TasksSnapshot = {
   me: UserSummary;
   projects: TaskProject[];
   labels: TaskLabel[];
+  statuses: TaskStatus[];
   members: UserSummary[];
   issues: TaskIssue[];
   counts: {
     all: number;
     mine: number;
-    byStatus: Record<TaskStatus, number>;
+    byStatus: Record<string, number>;
   };
 };
 

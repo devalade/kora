@@ -39,7 +39,7 @@ export function Avatar({
     <span className={cn('relative inline-grid shrink-0 rounded-full', outerSizes[size], className)}>
       <span
         className={cn(
-          'grid size-full place-items-center rounded-full p-[1.5px]',
+          'grid size-full place-items-center rounded-full p-[2px]',
           ring && 'ring-2 ring-paper',
         )}
         style={{ background: tone.ring }}
@@ -58,7 +58,7 @@ export function Avatar({
       {online !== undefined && (
         <span
           className={cn(
-            'absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2',
+            'absolute -right-0.5 -bottom-0.5 size-2 rounded-full border-2',
             online ? 'bg-mint-deep' : 'bg-faint',
           )}
           style={{ borderColor: 'var(--avatar-ring, #fffdf9)' }}

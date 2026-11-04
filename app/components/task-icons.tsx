@@ -1,35 +1,14 @@
+import type { CSSProperties } from 'react';
 import {
   CheckCircle2,
   Circle,
   CircleDashed,
   CircleDot,
-  Eye,
   MoreHorizontal,
   XCircle,
 } from 'lucide-react';
-import type { TaskLabel, TaskPriority, TaskStatus } from '../lib/types';
+import type { TaskLabel, TaskPriority, TaskStatus, TaskStatusCategory } from '../lib/types';
 import { cn } from '../utils/cn';
-
-export const STATUS_ORDER: TaskStatus[] = [
-  'in_progress',
-  'in_review',
-  'todo',
-  'backlog',
-  'done',
-  'canceled',
-];
-
-export const STATUS_META: Record<
-  TaskStatus,
-  { label: string; short: string; color: string; icon: typeof Circle }
-> = {
-  backlog: { label: 'Backlog', short: 'Backlog', color: '#a19b8f', icon: CircleDashed },
-  todo: { label: 'Todo', short: 'Todo', color: '#736f66', icon: Circle },
-  in_progress: { label: 'In Progress', short: 'In Progress', color: '#e0a23b', icon: CircleDot },
-  in_review: { label: 'In Review', short: 'In Review', color: '#5b8def', icon: Eye },
-  done: { label: 'Done', short: 'Done', color: '#17795f', icon: CheckCircle2 },
-  canceled: { label: 'Canceled', short: 'Canceled', color: '#a19b8f', icon: XCircle },
-};
 
 export const PRIORITY_META: Record<
   TaskPriority,
@@ -42,24 +21,52 @@ export const PRIORITY_META: Record<
   4: { label: 'Low', color: '#a19b8f', bars: 1 },
 };
 
+export const TASK_STATUS_CATEGORY_ICONS: Record<TaskStatusCategory, typeof Circle> = {
+  backlog: CircleDashed,
+  unstarted: Circle,
+  started: CircleDot,
+  completed: CheckCircle2,
+  canceled: XCircle,
+};
+
+export function TaskStatusCategoryIcon({
+  category,
+  color,
+  size = 16,
+  className,
+}: {
+  category: TaskStatusCategory;
+  color: string;
+  size?: number;
+  className?: string;
+}) {
+  const Icon = TASK_STATUS_CATEGORY_ICONS[category];
+  return (
+    <Icon
+      size={size}
+      strokeWidth={1.8}
+      className={cn('shrink-0', className)}
+      style={{ color }}
+      aria-hidden="true"
+    />
+  );
+}
+
 export function TaskStatusIcon({
   status,
-  size = 14,
+  size = 16,
   className,
 }: {
   status: TaskStatus;
   size?: number;
   className?: string;
 }) {
-  const meta = STATUS_META[status];
-  const Icon = meta.icon;
   return (
-    <Icon
+    <TaskStatusCategoryIcon
+      category={status.category}
+      color={status.color}
       size={size}
-      strokeWidth={1.8}
-      className={cn('shrink-0', className)}
-      style={{ color: meta.color }}
-      aria-hidden="true"
+      className={className}
     />
   );
 }
@@ -99,15 +106,22 @@ export function TaskPriorityIcon({
   );
 }
 
-export function TaskLabelPill({ label, compact }: { label: TaskLabel; compact?: boolean }) {
+export function TaskLabelPill({
+  label,
+  compact,
+  className,
+}: {
+  label: TaskLabel;
+  compact?: boolean;
+  className?: string;
+}) {
   return (
     <span
-      className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-full border border-line/70 bg-paper px-1.5 py-0.5 font-medium text-muted',
-        compact ? 'text-[9px]' : 'text-[10px]',
-      )}
+      className={cn('task-label', compact && 'task-label-compact', className)}
+      style={{ '--label-color': label.color } as CSSProperties}
+      title={label.name}
     >
-      <span className="size-1.5 shrink-0 rounded-full" style={{ background: label.color }} />
+      <span className="task-label-dot" aria-hidden="true" />
       <span className="truncate">{label.name}</span>
     </span>
   );

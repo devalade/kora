@@ -250,6 +250,25 @@ export const officeActivities = sqliteTable(
   (table) => [index('office_activities_workspace_idx').on(table.workspaceId, table.createdAt)],
 );
 
+export const taskStatuses = sqliteTable(
+  'task_statuses',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    category: text('category').notNull().default('unstarted'),
+    color: text('color').notNull().default('#736f66'),
+    position: integer('position').notNull().default(0),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [
+    uniqueIndex('task_statuses_workspace_name_idx').on(table.workspaceId, table.name),
+    index('task_statuses_workspace_position_idx').on(table.workspaceId, table.position),
+  ],
+);
+
 export const projects = sqliteTable(
   'projects',
   {
