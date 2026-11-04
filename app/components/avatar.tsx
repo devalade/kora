@@ -2,6 +2,7 @@ import { cn } from '../utils/cn';
 import { avatarTone, initials } from '../lib/people';
 
 const textSizes = {
+  '2xs': 'text-[8px]',
   xs: 'text-[9px]',
   sm: 'text-[10px]',
   md: 'text-[11px]',
@@ -11,6 +12,7 @@ const textSizes = {
 };
 
 const outerSizes = {
+  '2xs': 'size-5',
   xs: 'size-6',
   sm: 'size-8',
   md: 'size-9',

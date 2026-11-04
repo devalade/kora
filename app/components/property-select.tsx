@@ -100,11 +100,11 @@ export function PropertySelect({
           }
         }}
         className={cn(
-          'flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-paper px-2.5 text-left text-[13px] font-medium text-ink-soft transition-[border-color,box-shadow,background-color] duration-150 ease-out hover:border-ink/20 disabled:opacity-50',
+          'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 text-left text-[13px] font-medium text-ink-soft transition-[border-color,box-shadow,background-color] duration-150 ease-out hover:border-ink/20 disabled:opacity-50',
           open && 'border-ink/25 bg-paper shadow-[0_0_0_3px_rgba(23,26,26,0.05)]',
         )}
       >
-        {selected?.icon && <span className="grid size-4 shrink-0 place-items-center">{selected.icon}</span>}
+        <span className="grid size-5 shrink-0 place-items-center">{selected?.icon}</span>
         <span className={cn('min-w-0 flex-1 truncate', !selected && 'text-faint')}>
           {selected?.label ?? placeholder}
         </span>
@@ -147,9 +147,7 @@ export function PropertySelect({
                   index === active ? 'bg-canvas text-ink' : 'text-ink-soft',
                 )}
               >
-                {option.icon && (
-                  <span className="grid size-4 shrink-0 place-items-center">{option.icon}</span>
-                )}
+                <span className="grid size-5 shrink-0 place-items-center">{option.icon}</span>
                 <span className="min-w-0 flex-1 truncate">{option.label}</span>
                 {option.description && (
                   <span className="hidden text-[11px] text-faint sm:block">{option.description}</span>
