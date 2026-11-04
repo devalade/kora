@@ -28,7 +28,10 @@ huddles move between them.
 
 - Workspaces with invite codes, public channels, private channels, and direct messages
 - Message threads with reply counts that update live
-- Emoji reactions, mentions, channel links, and seeded demo conversations
+- @mention autocomplete for workspace teammates, with mention badges in the sidebar
+- Markdown messages with bold, italic, strikethrough, inline code, code blocks, lists, quotes, and links
+- Link previews that unfurl the page title, description, site name, and Open Graph image
+- Emoji reactions, channel links, and seeded demo conversations
 - File and image uploads with live progress, thumbnail previews, and a fullscreen image lightbox
 - Workspace search across every channel the signed-in user can see, with arrow-key and Enter navigation
 - Presence, typing indicators, unread badges, and per-channel read state

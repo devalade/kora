@@ -233,7 +233,7 @@ export function WorkspaceSidebar({
                     'group relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100',
                     channel.id === activeChannelId
                       ? 'bg-white/12 text-white'
-                      : channel.unread > 0
+                      : channel.unread > 0 || channel.mentions > 0
                         ? 'font-semibold text-white hover:bg-white/8'
                         : 'text-sidebar-text hover:bg-white/8 hover:text-white',
                   )}
@@ -243,6 +243,14 @@ export function WorkspaceSidebar({
                   )}
                   <Hash size={14} className="shrink-0 opacity-70" />
                   <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+                  {channel.mentions > 0 && channel.id !== activeChannelId && (
+                    <span
+                      className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink"
+                      title={`${channel.mentions} unread ${channel.mentions === 1 ? 'mention' : 'mentions'}`}
+                    >
+                      @
+                    </span>
+                  )}
                   {channel.unread > 0 && channel.id !== activeChannelId && (
                     <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-coral px-1 text-[10px] font-bold text-white tabular-nums">
                       {channel.unread > 99 ? '99+' : channel.unread}
@@ -279,7 +287,7 @@ export function WorkspaceSidebar({
                     'group relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100',
                     dm.id === activeChannelId
                       ? 'bg-white/12 text-white'
-                      : dm.unread > 0
+                      : dm.unread > 0 || dm.mentions > 0
                         ? 'font-semibold text-white hover:bg-white/8'
                         : 'text-sidebar-text hover:bg-white/8 hover:text-white',
                   )}
@@ -295,6 +303,14 @@ export function WorkspaceSidebar({
                     className="[--avatar-ring:#1d2523]"
                   />
                   <span className="min-w-0 flex-1 truncate">{dm.peer?.name ?? 'Direct message'}</span>
+                  {dm.mentions > 0 && dm.id !== activeChannelId && (
+                    <span
+                      className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink"
+                      title={`${dm.mentions} unread ${dm.mentions === 1 ? 'mention' : 'mentions'}`}
+                    >
+                      @
+                    </span>
+                  )}
                   {dm.unread > 0 && dm.id !== activeChannelId && (
                     <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-coral px-1 text-[10px] font-bold text-white tabular-nums">
                       {dm.unread}

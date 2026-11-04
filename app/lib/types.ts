@@ -24,6 +24,7 @@ export type ChannelSummary = {
   topic: string;
   kind: 'public' | 'private' | 'dm' | 'studio';
   unread: number;
+  mentions: number;
   memberCount: number;
   lastMessageAt: string | null;
   isMember: boolean;

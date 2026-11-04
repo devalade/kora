@@ -112,7 +112,10 @@ function WorkspacePage() {
       ) {
         setSnapshot(next);
         setHasMore(next.hasMore);
-        if (next.channel?.unread && document.visibilityState === 'visible') {
+        if (
+          (next.channel?.unread || next.channel?.mentions) &&
+          document.visibilityState === 'visible'
+        ) {
           void markReadFn({ data: { channelId: next.channel.id } });
         }
       }
@@ -224,6 +227,25 @@ function WorkspacePage() {
       to: '/app/$workspaceSlug/$channelId',
       params: { workspaceSlug: params.workspaceSlug, channelId },
     });
+  }
+
+  function openDmWith(userId: string) {
+    if (userId === snapshot.me.id) return;
+    const existing = snapshot.dms.find((dm) => dm.peer?.id === userId);
+    if (existing) {
+      void openChannel(existing.id);
+      return;
+    }
+    void (async () => {
+      try {
+        const { channelId } = await openDmFn({
+          data: { workspaceId: snapshot.workspace.id, userId },
+        });
+        await openChannel(channelId);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Could not open the conversation.');
+      }
+    })();
   }
 
   async function loadMore() {
@@ -461,6 +483,7 @@ function WorkspacePage() {
                   meId={snapshot.me.id}
                   channelLabel={channelLabel}
                   channelNames={channelNames}
+                  members={snapshot.members}
                   typing={snapshot.typing}
                   hasMore={hasMore}
                   loadingMore={loadingMore}
@@ -471,6 +494,7 @@ function WorkspacePage() {
                   onReact={(messageId, emoji) => void react(messageId, emoji)}
                   onOpenThread={(message) => setThreadId(message.id)}
                   onImageOpen={(url, name) => setLightbox({ url, name })}
+                  onMentionClick={openDmWith}
                 />
                 <div ref={bottomRef} className="h-4" />
               </div>
@@ -506,6 +530,7 @@ function WorkspacePage() {
                   ? `Message ${channelLabel}`
                   : `Message #${channelLabel}`
               }
+              members={snapshot.members}
               onSend={send}
               onTyping={onTyping}
             />
@@ -516,6 +541,9 @@ function WorkspacePage() {
               key={threadId}
               messageId={threadId}
               channelName={channelLabel}
+              members={snapshot.members}
+              meId={snapshot.me.id}
+              onMentionClick={openDmWith}
               onClose={() => setThreadId(null)}
               onChanged={() => void load()}
             />
@@ -523,19 +551,7 @@ function WorkspacePage() {
             <MembersPanel
               snapshot={snapshot}
               onClose={() => setMembersOpen(false)}
-              onOpenDm={(userId) => {
-                const existing = snapshot.dms.find((dm) => dm.peer?.id === userId);
-                if (existing) {
-                  void openChannel(existing.id);
-                  return;
-                }
-                void (async () => {
-                  const { channelId } = await openDmFn({
-                    data: { workspaceId: snapshot.workspace.id, userId },
-                  });
-                  await openChannel(channelId);
-                })();
-              }}
+              onOpenDm={openDmWith}
             />
           ) : null}
         </div>

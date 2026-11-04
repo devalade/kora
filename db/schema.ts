@@ -154,6 +154,16 @@ export const attachments = sqliteTable(
   (table) => [index('attachments_message_idx').on(table.messageId)],
 );
 
+export const linkPreviews = sqliteTable('link_previews', {
+  url: text('url').primaryKey(),
+  title: text('title').notNull().default(''),
+  description: text('description').notNull().default(''),
+  imageUrl: text('image_url'),
+  siteName: text('site_name').notNull().default(''),
+  domain: text('domain').notNull().default(''),
+  fetchedAt: text('fetched_at').notNull().default(nowIso),
+});
+
 export const calls = sqliteTable(
   'calls',
   {

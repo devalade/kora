@@ -2,23 +2,30 @@ import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getThreadFn, sendMessageFn, toggleReactionFn } from '../lib/chat';
-import type { MessageView, ThreadView } from '../lib/types';
+import type { MessageView, ThreadView, UserSummary } from '../lib/types';
 import { Avatar } from './avatar';
 import { clockTime, fullDate, plural } from '../lib/format';
 import { MessageComposer } from './message-composer';
+import { MessageLinkPreviews } from './link-preview';
 import { RichText } from './rich-text';
 import { cn } from '../utils/cn';
 
 export function ThreadPanel({
   messageId,
   channelName,
+  members,
+  meId,
   onClose,
   onChanged,
+  onMentionClick,
 }: {
   messageId: string;
   channelName: string;
+  members?: UserSummary[];
+  meId?: string;
   onClose: () => void;
   onChanged: () => void;
+  onMentionClick?: (userId: string) => void;
 }) {
   const [thread, setThread] = useState<ThreadView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +104,14 @@ export function ThreadPanel({
         {error && <p className="text-sm text-danger">{error}</p>}
         {thread && (
           <div className="space-y-4">
-            <ThreadMessage message={thread.parent} onReact={react} large />
+            <ThreadMessage
+              message={thread.parent}
+              onReact={react}
+              members={members}
+              meId={meId}
+              onMentionClick={onMentionClick}
+              large
+            />
             {thread.replies.length > 0 && (
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold tracking-wide text-faint uppercase">
@@ -107,7 +121,14 @@ export function ThreadPanel({
               </div>
             )}
             {thread.replies.map((message) => (
-              <ThreadMessage key={message.id} message={message} onReact={react} />
+              <ThreadMessage
+                key={message.id}
+                message={message}
+                onReact={react}
+                members={members}
+                meId={meId}
+                onMentionClick={onMentionClick}
+              />
             ))}
           </div>
         )}
@@ -118,6 +139,7 @@ export function ThreadPanel({
           compact
           channelLabel={`#${channelName}`}
           placeholder="Reply in thread"
+          members={members}
           onSend={reply}
           onTyping={() => undefined}
         />
@@ -129,10 +151,16 @@ export function ThreadPanel({
 function ThreadMessage({
   message,
   onReact,
+  members,
+  meId,
+  onMentionClick,
   large,
 }: {
   message: MessageView;
   onReact: (messageId: string, emoji: string) => void;
+  members?: UserSummary[];
+  meId?: string;
+  onMentionClick?: (userId: string) => void;
   large?: boolean;
 }) {
   return (
@@ -146,8 +174,14 @@ function ThreadMessage({
           </span>
         </div>
         <div className="mt-0.5 text-[13.5px] leading-6 text-ink-soft">
-          <RichText body={message.body} />
+          <RichText
+            body={message.body}
+            members={members}
+            meId={meId}
+            onMentionClick={onMentionClick}
+          />
         </div>
+        <MessageLinkPreviews body={message.body} compact />
         {message.attachments.length > 0 && (
           <div className="mt-2 space-y-1.5">
             {message.attachments.map((attachment) =>

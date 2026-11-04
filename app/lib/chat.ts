@@ -28,6 +28,7 @@ import {
 import { z } from 'zod';
 import { readSessionUser } from './session';
 import { newId, newInviteCode, slugify } from './ids';
+import { mentionHandle } from './mentions';
 import { toUserSummary } from './people';
 import { memberUsers, requireChannel, requireUser, requireWorkspace, touchPresence } from './server';
 import type {
@@ -186,6 +187,7 @@ async function channelSummaries(
   workspaceId: string,
   viewerId: string,
   memberRows: { channelId: string; userId: string; lastReadAt: string }[],
+  viewerHandle: string,
 ): Promise<ChannelSummary[]> {
   const channelRows = await db
     .select()
@@ -199,8 +201,9 @@ async function channelSummaries(
     .select({ channelId: channelMembers.channelId, userId: channelMembers.userId })
     .from(channelMembers)
     .where(inArray(channelMembers.channelId, ids));
+  const mentionPattern = `%@${viewerHandle.replace(/[!%_]/g, '!$&')}%`;
 
-  const [lastRows, unreadRows] = await Promise.all([
+  const [lastRows, unreadRows, mentionRows] = await Promise.all([
     db
       .select({
         channelId: messages.channelId,
@@ -232,14 +235,37 @@ async function channelSummaries(
         ),
       )
       .groupBy(messages.channelId),
+    db
+      .select({
+        channelId: messages.channelId,
+        count: sql<number>`count(*)`,
+      })
+      .from(messages)
+      .innerJoin(
+        channelMembers,
+        and(
+          eq(channelMembers.channelId, messages.channelId),
+          eq(channelMembers.userId, viewerId),
+        ),
+      )
+      .where(
+        and(
+          inArray(messages.channelId, ids),
+          gt(messages.createdAt, channelMembers.lastReadAt),
+          ne(messages.userId, viewerId),
+          isNull(messages.deletedAt),
+          sql`lower(${messages.body}) like ${mentionPattern} escape '!'`,
+        ),
+      )
+      .groupBy(messages.channelId),
   ]);
 
   const memberCount = new Map<string, number>();
   for (const row of allMembers) {
     memberCount.set(row.channelId, (memberCount.get(row.channelId) ?? 0) + 1);
   }
-  const lastMap = new Map(lastRows.map((row) => [row.channelId, row.last]));
-  const unreadMap = new Map(unreadRows.map((row) => [row.channelId, Number(row.count)]));
+  const lastMap = new Map(lastRows.map((row) => [row.channelId, row.last]));  const unreadMap = new Map(unreadRows.map((row) => [row.channelId, Number(row.count)]));
+  const mentionMap = new Map(mentionRows.map((row) => [row.channelId, Number(row.count)]));
   const mine = new Map(memberRows.map((row) => [row.channelId, row]));
 
   return channelRows.map((channel) => ({
@@ -248,6 +274,7 @@ async function channelSummaries(
     topic: channel.topic,
     kind: channel.kind as ChannelSummary['kind'],
     unread: unreadMap.get(channel.id) ?? 0,
+    mentions: mentionMap.get(channel.id) ?? 0,
     memberCount: memberCount.get(channel.id) ?? 0,
     lastMessageAt: lastMap.get(channel.id) ?? null,
     isMember: mine.has(channel.id),
@@ -522,7 +549,7 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
 
     const [members, summaries] = await Promise.all([
       memberUsers(workspace.id),
-      channelSummaries(workspace.id, me.id, memberRows),
+      channelSummaries(workspace.id, me.id, memberRows, mentionHandle(me)),
     ]);
     const usersById = new Map(members.map((member) => [member.id, member]));
     const myChannelIds = new Set(memberRows.map((row) => row.channelId));

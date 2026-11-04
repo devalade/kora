@@ -3,6 +3,7 @@ import type { MessageView, UserSummary } from '../lib/types';
 import { Avatar } from './avatar';
 import { clockTime, dayLabel, fileSize, fullDate, plural, relativeTime } from '../lib/format';
 import { RichText } from './rich-text';
+import { MessageLinkPreviews } from './link-preview';
 import { cn } from '../utils/cn';
 
 const QUICK_REACTIONS = ['👍', '🎉', '❤️'];
@@ -12,6 +13,7 @@ export function MessageList({
   meId,
   channelLabel,
   channelNames,
+  members,
   typing,
   hasMore,
   loadingMore,
@@ -22,11 +24,13 @@ export function MessageList({
   onReact,
   onOpenThread,
   onImageOpen,
+  onMentionClick,
 }: {
   messages: MessageView[];
   meId: string;
   channelLabel: string;
   channelNames?: Set<string>;
+  members?: UserSummary[];
   typing: UserSummary[];
   hasMore: boolean;
   loadingMore: boolean;
@@ -37,6 +41,7 @@ export function MessageList({
   onReact: (messageId: string, emoji: string) => void;
   onOpenThread: (message: MessageView) => void;
   onImageOpen: (url: string, name: string) => void;
+  onMentionClick?: (userId: string) => void;
 }) {
   return (
     <div className="pb-2">
@@ -99,10 +104,13 @@ export function MessageList({
                   grouped={Boolean(grouped)}
                   isMine={message.author.id === meId}
                   channelNames={channelNames}
+                  members={members}
+                  meId={meId}
                   onReply={onReply}
                   onReact={onReact}
                   onOpenThread={onOpenThread}
                   onImageOpen={onImageOpen}
+                  onMentionClick={onMentionClick}
                 />
               </div>
             );
@@ -120,19 +128,25 @@ function MessageRow({
   grouped,
   isMine,
   channelNames,
+  members,
+  meId,
   onReply,
   onReact,
   onOpenThread,
   onImageOpen,
+  onMentionClick,
 }: {
   message: MessageView;
   grouped: boolean;
   isMine: boolean;
   channelNames?: Set<string>;
+  members?: UserSummary[];
+  meId: string;
   onReply: (message: MessageView) => void;
   onReact: (messageId: string, emoji: string) => void;
   onOpenThread: (message: MessageView) => void;
   onImageOpen: (url: string, name: string) => void;
+  onMentionClick?: (userId: string) => void;
 }) {
   return (
     <div
@@ -176,9 +190,17 @@ function MessageRow({
           )}
 
           <div className="text-[14.5px] leading-6 text-ink-soft">
-            <RichText body={message.body} channelNames={channelNames} />
+            <RichText
+              body={message.body}
+              channelNames={channelNames}
+              members={members}
+              meId={meId}
+              onMentionClick={onMentionClick}
+            />
             {message.editedAt && <span className="ml-1 text-[11px] text-faint">(edited)</span>}
           </div>
+
+          <MessageLinkPreviews body={message.body} />
 
           {message.attachments.length > 0 && (
             <div className="mt-2 flex flex-col gap-2">

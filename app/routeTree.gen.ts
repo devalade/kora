@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as ApiLinkPreviewRouteImport } from './routes/api.link-preview'
 import { Route as ApiUploadRouteImport } from './routes/api.upload'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as JoinCodeRouteImport } from './routes/join.$code'
@@ -37,6 +38,11 @@ const LoginRoute = LoginRouteImport.update({
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLinkPreviewRoute = ApiLinkPreviewRouteImport.update({
+  id: '/api/link-preview',
+  path: '/api/link-preview',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiUploadRoute = ApiUploadRouteImport.update({
@@ -103,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app/': typeof AppIndexRoute
@@ -119,6 +126,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app': typeof AppIndexRoute
@@ -135,6 +143,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app/': typeof AppIndexRoute
@@ -153,6 +162,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/api/link-preview'
     | '/api/upload'
     | '/join/$code'
     | '/app/'
@@ -169,6 +179,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/api/link-preview'
     | '/api/upload'
     | '/join/$code'
     | '/app'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/api/link-preview'
     | '/api/upload'
     | '/join/$code'
     | '/app/'
@@ -201,6 +213,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
+  ApiLinkPreviewRoute: typeof ApiLinkPreviewRoute
   ApiUploadRoute: typeof ApiUploadRoute
   JoinCodeRoute: typeof JoinCodeRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/link-preview': {
+      id: '/api/link-preview'
+      path: '/api/link-preview'
+      fullPath: '/api/link-preview'
+      preLoaderRoute: typeof ApiLinkPreviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/upload': {
@@ -335,6 +355,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
+  ApiLinkPreviewRoute: ApiLinkPreviewRoute,
   ApiUploadRoute: ApiUploadRoute,
   JoinCodeRoute: JoinCodeRoute,
   AppIndexRoute: AppIndexRoute,

@@ -1,6 +1,11 @@
 import {
   AlertCircle,
+  AtSign,
+  Bold,
+  Code2,
   FileText,
+  Italic,
+  Link2,
   Loader2,
   Paperclip,
   RotateCcw,
@@ -8,9 +13,18 @@ import {
   Smile,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { htmlToMarkdown } from '../lib/clipboard';
+import {
+  findMentionTrigger,
+  matchMentionPeople,
+  mentionHandle,
+  type MentionTrigger,
+} from '../lib/mentions';
+import type { UserSummary } from '../lib/types';
 import { cn } from '../utils/cn';
+import { Avatar } from './avatar';
 
 type Draft = {
   localId: string;
@@ -53,6 +67,7 @@ export function MessageComposer({
   placeholder,
   compact,
   replyingTo,
+  members,
   onCancelReply,
   onSend,
   onTyping,
@@ -61,6 +76,7 @@ export function MessageComposer({
   placeholder?: string;
   compact?: boolean;
   replyingTo?: string;
+  members?: UserSummary[];
   onCancelReply?: () => void;
   onSend: (body: string, attachmentIds: string[]) => Promise<void>;
   onTyping: (active: boolean) => void;
@@ -69,17 +85,25 @@ export function MessageComposer({
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [sending, setSending] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [mention, setMention] = useState<MentionTrigger | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const emojiPopoverRef = useRef<HTMLDivElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
+  const mentionPopoverRef = useRef<HTMLDivElement>(null);
+  const mentionButtonRef = useRef<HTMLButtonElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const xhrs = useRef<Map<string, XMLHttpRequest>>(new Map());
   const draftsRef = useRef<Draft[]>([]);
   const uploading = drafts.some((draft) => draft.status === 'uploading');
   const readyFiles = drafts.filter((draft) => draft.status === 'done');
   const hasFailed = drafts.some((draft) => draft.status === 'error');
+  const mentionResults = useMemo(
+    () => (mention ? matchMentionPeople(members ?? [], mention.query).slice(0, 8) : []),
+    [members, mention],
+  );
 
   useEffect(() => {
     const stored = window.localStorage.getItem('kora.recentEmojis');
@@ -124,6 +148,23 @@ export function MessageComposer({
     };
   }, [emojiOpen]);
 
+  useEffect(() => {
+    if (!mention) return;
+    const active = mentionPopoverRef.current?.querySelector('[aria-selected="true"]');
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [mention, mentionIndex]);
+
+  useEffect(() => {
+    if (!mention) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (mentionPopoverRef.current?.contains(event.target as Node)) return;
+      if (mentionButtonRef.current?.contains(event.target as Node)) return;
+      setMention(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [mention]);
+
   function markTyping() {
     onTyping(true);
     if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -135,6 +176,104 @@ export function MessageComposer({
     if (!element) return;
     element.style.height = '0px';
     element.style.height = `${Math.min(element.scrollHeight, 180)}px`;
+  }
+
+  function syncMention(value: string, cursor: number) {
+    if (!members?.length) {
+      setMention(null);
+      return;
+    }
+    const trigger = findMentionTrigger(value, cursor);
+    if (trigger) setEmojiOpen(false);
+    setMention(trigger);
+    setMentionIndex(0);
+  }
+
+  function replaceSelection(text: string, selectStart: number, selectEnd = selectStart) {
+    const element = textRef.current;
+    const start = element?.selectionStart ?? body.length;
+    const end = element?.selectionEnd ?? start;
+    const next = body.slice(0, start) + text + body.slice(end);
+    setBody(next);
+    setMention(null);
+    markTyping();
+    requestAnimationFrame(() => {
+      const target = textRef.current;
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(start + selectStart, start + selectEnd);
+      resize();
+    });
+  }
+
+  function wrapSelection(prefix: string, suffix = prefix, placeholder = 'text') {
+    const element = textRef.current;
+    const start = element?.selectionStart ?? body.length;
+    const end = element?.selectionEnd ?? start;
+    const selected = body.slice(start, end) || placeholder;
+    replaceSelection(`${prefix}${selected}${suffix}`, prefix.length, prefix.length + selected.length);
+  }
+
+  function insertLink() {
+    const element = textRef.current;
+    const start = element?.selectionStart ?? body.length;
+    const end = element?.selectionEnd ?? start;
+    const selected = body.slice(start, end) || 'link text';
+    const text = `[${selected}](https://)`;
+    replaceSelection(text, selected.length + 3, selected.length + 11);
+  }
+
+  function chooseMention(person: UserSummary) {
+    const trigger = mention;
+    if (!trigger) return;
+    const token = `@${mentionHandle(person)} `;
+    const next = body.slice(0, trigger.start) + token + body.slice(trigger.end);
+    setBody(next);
+    setMention(null);
+    markTyping();
+    requestAnimationFrame(() => {
+      const target = textRef.current;
+      if (!target) return;
+      target.focus();
+      const cursor = trigger.start + token.length;
+      target.setSelectionRange(cursor, cursor);
+      resize();
+    });
+  }
+
+  function startMention() {
+    if (!members?.length) return;
+    const element = textRef.current;
+    const start = element?.selectionStart ?? body.length;
+    const end = element?.selectionEnd ?? start;
+    const needsSpace = start > 0 && !/[\s([{]/.test(body[start - 1] ?? '');
+    const prefix = needsSpace ? ' ' : '';
+    const next = body.slice(0, start) + prefix + '@' + body.slice(end);
+    const triggerStart = start + prefix.length;
+    setBody(next);
+    setEmojiOpen(false);
+    setMention({ start: triggerStart, end: triggerStart + 1, query: '' });
+    setMentionIndex(0);
+    markTyping();
+    requestAnimationFrame(() => {
+      const target = textRef.current;
+      if (!target) return;
+      target.focus();
+      const cursor = triggerStart + 1;
+      target.setSelectionRange(cursor, cursor);
+      resize();
+    });
+  }
+
+  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const html = event.clipboardData.getData('text/html');
+    if (!html) return;
+    const markdown = htmlToMarkdown(html);
+    if (!markdown || markdown.length > 8000) return;
+    const hasFormatting = /(\*\*|~~|`|\[[^\]]+\]\(|\n[-*] |\n\d+\. )/.test(markdown);
+    if (!hasFormatting) return;
+    event.preventDefault();
+    replaceSelection(markdown, markdown.length);
   }
 
   function patchDraft(localId: string, patch: Partial<Draft>) {
@@ -265,6 +404,7 @@ export function MessageComposer({
       setBody('');
       setDrafts([]);
       setEmojiOpen(false);
+      setMention(null);
       onTyping(false);
       if (textRef.current) {
         textRef.current.style.height = '0px';
@@ -318,11 +458,64 @@ export function MessageComposer({
         rows={1}
         value={body}
         onChange={(event) => {
-          setBody(event.target.value);
+          const next = event.target.value;
+          setBody(next);
           resize();
+          syncMention(next, event.target.selectionStart);
           markTyping();
         }}
+        onPaste={handlePaste}
         onKeyDown={(event) => {
+          if (mention) {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setMention(null);
+              return;
+            }
+            if (mentionResults.length > 0) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setMentionIndex((current) => (current + 1) % mentionResults.length);
+                return;
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setMentionIndex(
+                  (current) => (current - 1 + mentionResults.length) % mentionResults.length,
+                );
+                return;
+              }
+              if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault();
+                chooseMention(mentionResults[Math.min(mentionIndex, mentionResults.length - 1)]);
+                return;
+              }
+            }
+          }
+          const modifier = event.metaKey || event.ctrlKey;
+          if (modifier && !event.altKey) {
+            const key = event.key.toLowerCase();
+            if (key === 'b') {
+              event.preventDefault();
+              wrapSelection('**');
+              return;
+            }
+            if (key === 'i') {
+              event.preventDefault();
+              wrapSelection('*');
+              return;
+            }
+            if (key === 'e') {
+              event.preventDefault();
+              wrapSelection('`');
+              return;
+            }
+            if (key === 'k') {
+              event.preventDefault();
+              insertLink();
+              return;
+            }
+          }
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             void submit();
@@ -349,6 +542,7 @@ export function MessageComposer({
             label="Attach a file"
             onClick={() => {
               setEmojiOpen(false);
+              setMention(null);
               inputRef.current?.click();
             }}
           >
@@ -356,9 +550,54 @@ export function MessageComposer({
           </ComposerIcon>
 
           <button
+            ref={mentionButtonRef}
+            type="button"
+            onClick={() => {
+              setEmojiOpen(false);
+              if (mention) {
+                setMention(null);
+                textRef.current?.focus();
+                return;
+              }
+              startMention();
+            }}
+            className={cn(
+              'grid size-8 place-items-center rounded-[10px] transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.96]',
+              mention
+                ? 'bg-coral-soft text-coral-deep'
+                : 'text-muted hover:bg-line-soft hover:text-ink',
+            )}
+            aria-label="Tag a teammate"
+            aria-expanded={Boolean(mention)}
+            aria-haspopup="listbox"
+            title="Tag a teammate (@)"
+          >
+            <AtSign size={16} strokeWidth={1.8} />
+          </button>
+
+          <span className="mx-1 hidden h-4 w-px bg-line sm:block" />
+          <span className="hidden items-center gap-0.5 sm:flex">
+            <ComposerIcon label="Bold (Cmd+B)" keepFocus onClick={() => wrapSelection('**')}>
+              <Bold size={15} strokeWidth={2} />
+            </ComposerIcon>
+            <ComposerIcon label="Italic (Cmd+I)" keepFocus onClick={() => wrapSelection('*')}>
+              <Italic size={15} strokeWidth={2} />
+            </ComposerIcon>
+            <ComposerIcon label="Code (Cmd+E)" keepFocus onClick={() => wrapSelection('`')}>
+              <Code2 size={15} strokeWidth={1.9} />
+            </ComposerIcon>
+            <ComposerIcon label="Link (Cmd+K)" keepFocus onClick={insertLink}>
+              <Link2 size={15} strokeWidth={1.9} />
+            </ComposerIcon>
+          </span>
+
+          <button
             ref={emojiButtonRef}
             type="button"
-            onClick={() => setEmojiOpen((open) => !open)}
+            onClick={() => {
+              setEmojiOpen((open) => !open);
+              setMention(null);
+            }}
             className={cn(
               'grid size-8 place-items-center rounded-[10px] transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.96]',
               emojiOpen
@@ -410,6 +649,71 @@ export function MessageComposer({
           </button>
         </div>
       </div>
+      {mention && (
+        <div
+          ref={mentionPopoverRef}
+          role="listbox"
+          aria-label="Tag a teammate"
+          className="popover-in absolute bottom-[calc(100%+10px)] left-3 z-40 w-[300px] overflow-hidden rounded-[16px] border border-line/70 bg-paper shadow-[var(--kora-shadow-popover)]"
+        >
+          <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
+            <span className="text-[10px] font-semibold tracking-[0.1em] text-faint uppercase">
+              Tag a teammate
+            </span>
+            <span className="text-[10px] text-faint">↑↓ · Enter</span>
+          </div>
+          <div className="scroll-thin max-h-[264px] overflow-y-auto px-1.5 pb-2">
+            {mentionResults.length === 0 ? (
+              <p className="px-2 py-3 text-[12px] text-muted">
+                No teammate matches @{mention.query}.
+              </p>
+            ) : (
+              mentionResults.map((person, index) => {
+                const active = index === Math.min(mentionIndex, mentionResults.length - 1);
+                return (
+                  <button
+                    key={person.id}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setMentionIndex(index)}
+                    onClick={() => chooseMention(person)}
+                    className={cn(
+                      'flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left transition-colors duration-100',
+                      active ? 'bg-coral-soft/75' : 'hover:bg-line-soft',
+                    )}
+                  >
+                    <Avatar
+                      name={person.name}
+                      color={person.avatarColor}
+                      size="sm"
+                      online={person.online}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium text-ink">
+                        {person.name}
+                      </span>
+                      <span className="block truncate text-[10.5px] text-faint">
+                        @{person.handle}
+                        {person.title ? ` · ${person.title}` : ''}
+                      </span>
+                    </span>
+                    {active && (
+                      <span
+                        aria-hidden="true"
+                        className="rounded border border-line bg-paper px-1 py-0.5 font-mono text-[9px] text-faint"
+                      >
+                        Enter
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
       {emojiOpen && (
               <div
                 ref={emojiPopoverRef}
@@ -575,15 +879,18 @@ function EmojiButton({ emoji, onPick }: { emoji: string; onPick: (emoji: string)
 function ComposerIcon({
   label,
   onClick,
+  keepFocus,
   children,
 }: {
   label: string;
   onClick: () => void;
+  keepFocus?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
+      onMouseDown={keepFocus ? (event) => event.preventDefault() : undefined}
       onClick={onClick}
       className="grid size-8 place-items-center rounded-[10px] text-muted transition-[background-color,color,transform] duration-150 ease-out hover:bg-line-soft hover:text-ink active:scale-[0.96]"
       aria-label={label}
