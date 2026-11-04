@@ -17,7 +17,14 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
 import { createIssueFn, getTasksFn, updateIssueFn } from '../lib/tasks';
@@ -39,6 +46,9 @@ import {
 } from '../components/task-icons';
 import { TasksSidebar } from '../components/tasks-sidebar';
 import { cn } from '../utils/cn';
+
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export const Route = createFileRoute('/app/$workspaceSlug/tasks/')({
   beforeLoad: async () => {
@@ -77,6 +87,8 @@ function TasksPage() {
   const justMovedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [updating, setUpdating] = useState(false);
   const requestRef = useRef(0);
+  const lastActionRef = useRef({ key: '', at: 0 });
+  const lastQuickAddRef = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const view: TasksView = search.view ?? 'all';
@@ -144,7 +156,12 @@ function TasksPage() {
   });
 
   useEffect(() => {
-    if (!quickAddStatus) return;
+    if (!quickAddStatus) {
+      lastQuickAddRef.current = null;
+      return;
+    }
+    if (lastQuickAddRef.current === quickAddStatus) return;
+    lastQuickAddRef.current = quickAddStatus;
     const index = grouped.findIndex(
       (item) => item.type === 'quick-add' && item.status.id === quickAddStatus,
     );
@@ -173,7 +190,7 @@ function TasksPage() {
 
   const collapseKey = `kora:task-collapsed:${snapshot.workspace.id}`;
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     setCollapseStateLoaded(false);
     try {
       const saved = window.localStorage.getItem(collapseKey);
@@ -280,6 +297,15 @@ function TasksPage() {
     }
   }
 
+  function isRapidRepeat(key: string) {
+    const now = Date.now();
+    if (lastActionRef.current.key === key && now - lastActionRef.current.at < 300) {
+      return true;
+    }
+    lastActionRef.current = { key, at: now };
+    return false;
+  }
+
   function anchorHeightChange(delta: number) {
     const container = parentRef.current;
     if (!container) return;
@@ -288,6 +314,7 @@ function TasksPage() {
   }
 
   function toggleGroup(statusId: string) {
+    if (isRapidRepeat(`group:${statusId}`)) return;
     const isCollapsing = !collapsedStatuses.has(statusId);
     const issueCount = filtered.filter((issue) => issue.status.id === statusId).length;
     const quickAddHeight = quickAddStatus === statusId ? 56 : 0;
@@ -306,6 +333,7 @@ function TasksPage() {
   }
 
   function openQuickAdd(statusId: string) {
+    if (isRapidRepeat(`quick:${statusId}`)) return;
     const isClosing = quickAddStatus === statusId;
     const isSwitching = quickAddStatus !== null && quickAddStatus !== statusId;
     const isCollapsed = collapsedStatuses.has(statusId);
@@ -861,7 +889,7 @@ function IssueList({
                   onClick={() => onToggleGroup(item.status.id)}
                   aria-expanded={!item.collapsed}
                   aria-label={`${item.collapsed ? 'Expand' : 'Collapse'} ${item.status.name}`}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 text-left transition-colors duration-150 hover:text-ink"
+                  className="flex min-w-0 flex-1 select-none items-center gap-2 rounded-md py-1 text-left transition-colors duration-150 hover:text-ink"
                 >
                   <ChevronRight
                     size={14}

@@ -21,6 +21,16 @@ const outerSizes = {
   '2xl': 'size-24',
 };
 
+const statusDotSizes = {
+  '2xs': 'size-[6px] border-[1.5px] right-0 bottom-0',
+  xs: 'size-2 border-[1.5px] right-0 bottom-0',
+  sm: 'size-[9px] border-2 right-0 bottom-0',
+  md: 'size-2.5 border-2 right-0 bottom-0',
+  lg: 'size-[11px] border-2 right-px bottom-px',
+  xl: 'size-3.5 border-2 right-0.5 bottom-0.5',
+  '2xl': 'size-[18px] border-[3px] right-1.5 bottom-1.5',
+};
+
 export function Avatar({
   name,
   size = 'md',
@@ -60,10 +70,12 @@ export function Avatar({
       {online !== undefined && (
         <span
           className={cn(
-            'absolute -right-0.5 -bottom-0.5 size-2 rounded-full border-2',
+            'absolute rounded-full',
+            statusDotSizes[size],
             online ? 'bg-mint-deep' : 'bg-faint',
           )}
           style={{ borderColor: 'var(--avatar-ring, #fffdf9)' }}
+          aria-hidden="true"
         />
       )}
     </span>
