@@ -17,6 +17,12 @@ export const Route = createRootRoute({
       },
       { name: 'theme-color', content: '#151b19' },
     ],
+    links: [
+      { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+      { rel: 'icon', href: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      { rel: 'manifest', href: '/site.webmanifest' },
+    ],
   }),
   loader: () => getSessionUserFn(),
   component: RootComponent,
