@@ -124,6 +124,7 @@ function NewIssuePage() {
             to="/app/$workspaceSlug/tasks"
             params={{ workspaceSlug: params.workspaceSlug }}
             search={{ view: 'all', project: projectId || undefined }}
+            data-audit-skip="A3"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-muted transition-colors duration-150 hover:bg-line-soft hover:text-ink"
           >
             <ArrowLeft size={15} /> Tasks

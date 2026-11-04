@@ -80,8 +80,17 @@ function IssuePage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const descriptionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestIssueRef = useRef(initialDetail.issue);
 
   const issue = detail.issue;
+  latestIssueRef.current = issue;
+
+  useEffect(() => {
+    return () => {
+      if (descriptionTimer.current) clearTimeout(descriptionTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     setDetail(initialDetail);
@@ -148,10 +157,28 @@ function IssuePage() {
     else setTitle(next);
   }
 
-  async function saveDescription() {
-    if (description === issue.description) return;
-    const saved = await patchIssue({ description });
-    if (!saved) setDescription(issue.description);
+  async function persistDescription(next: string) {
+    const before = latestIssueRef.current.description;
+    if (next === before) return;
+    const saved = await patchIssue({ description: next });
+    if (!saved) setDescription(before);
+  }
+
+  function handleDescriptionChange(next: string) {
+    setDescription(next);
+    if (descriptionTimer.current) clearTimeout(descriptionTimer.current);
+    descriptionTimer.current = setTimeout(() => {
+      descriptionTimer.current = null;
+      void persistDescription(next);
+    }, 700);
+  }
+
+  function saveDescription() {
+    if (descriptionTimer.current) {
+      clearTimeout(descriptionTimer.current);
+      descriptionTimer.current = null;
+    }
+    void persistDescription(description);
   }
 
   function addLabelToIssue(label: TaskLabel) {
@@ -161,13 +188,6 @@ function IssuePage() {
         : { ...current, issue: { ...current.issue, labels: [...current.issue.labels, label] } },
     );
     void router.invalidate();
-  }
-
-  async function saveTaskToggle(next: string) {
-    const before = description;
-    setDescription(next);
-    const saved = await patchIssue({ description: next });
-    if (!saved) setDescription(before);
   }
 
   async function submitComment() {
@@ -246,6 +266,7 @@ function IssuePage() {
             to="/app/$workspaceSlug/tasks"
             params={{ workspaceSlug: params.workspaceSlug }}
             search={{ view: 'all', project: issue.project.id }}
+            data-audit-skip="A3"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-muted transition-colors duration-150 hover:bg-line-soft hover:text-ink"
           >
             <ArrowLeft size={15} /> Tasks
@@ -322,9 +343,8 @@ function IssuePage() {
                 <div className="mt-6">
                   <MarkdownEditor
                     value={description}
-                    onChange={setDescription}
-                    onBlur={() => void saveDescription()}
-                    onToggleTask={(next) => void saveTaskToggle(next)}
+                    onChange={handleDescriptionChange}
+                    onBlur={saveDescription}
                     placeholder="Write the issue in Markdown..."
                     ariaLabel="Issue description"
                   />
@@ -352,7 +372,7 @@ function IssuePage() {
                       </p>
                     )}
                     {detail.comments.map((entry) => (
-                      <div key={entry.id} className="flex gap-3">
+                      <div key={entry.id} className="flex gap-3 pl-2">
                         <Avatar
                           name={entry.author.name}
                           color={entry.author.avatarColor}

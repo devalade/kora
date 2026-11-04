@@ -1,116 +1,139 @@
-import { Bold, Code2, Italic, Link2, ListTodo } from 'lucide-react';
+import { Bold, Code2, Italic, Link2, ListTodo, Loader2 } from 'lucide-react';
+import { EditorContent, useEditor } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import { TaskList } from '@tiptap/extension-task-list';
+import { TaskItem } from '@tiptap/extension-task-item';
+import { Placeholder } from '@tiptap/extension-placeholder';
+import { Markdown } from '@tiptap/markdown';
 import { useEffect, useRef } from 'react';
-import { taskProgress, toggleTaskAtLine } from '../lib/markdown';
+import { taskProgress } from '../lib/markdown';
 import { cn } from '../utils/cn';
-import { MarkdownView } from './markdown-view';
 
 export function MarkdownEditor({
   value,
   onChange,
   onBlur,
-  onToggleTask,
   placeholder = 'Write in Markdown...',
   ariaLabel = 'Description',
 }: {
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
-  onToggleTask?: (value: string) => void;
   placeholder?: string;
   ariaLabel?: string;
 }) {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const onChangeRef = useRef(onChange);
+  const lastSyncedValue = useRef(value);
+  const onBlurRef = useRef(onBlur);
+  onChangeRef.current = onChange;
+  onBlurRef.current = onBlur;
   const progress = taskProgress(value);
 
+  const editor = useEditor({
+    immediatelyRender: false,
+    shouldRerenderOnTransaction: true,
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        link: { openOnClick: false },
+      }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Placeholder.configure({ placeholder }),
+      Markdown.configure({ markedOptions: { gfm: true } }),
+    ],
+    content: value,
+    contentType: 'markdown',
+    editorProps: {
+      attributes: {
+        class: 'tiptap markdown-body',
+        'aria-label': ariaLabel,
+      },
+    },
+    onUpdate: ({ editor: current }) => {
+      const markdown = current.getMarkdown();
+      lastSyncedValue.current = markdown;
+      onChangeRef.current(markdown);
+    },
+    onBlur: () => {
+      onBlurRef.current?.();
+    },
+  });
+
   useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.style.height = '0px';
-    input.style.height = `${Math.min(420, Math.max(160, input.scrollHeight))}px`;
-  }, [value]);
+    if (!editor) return;
+    if (value === lastSyncedValue.current) return;
+    lastSyncedValue.current = value;
+    editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false });
+  }, [editor, value]);
 
-  function wrap(prefix: string, suffix: string, fallback: string) {
-    const input = inputRef.current;
-    if (!input) return;
-    const start = input.selectionStart;
-    const end = input.selectionEnd;
-    const selected = value.slice(start, end) || fallback;
-    const next = `${value.slice(0, start)}${prefix}${selected}${suffix}${value.slice(end)}`;
-    onChange(next);
-    requestAnimationFrame(() => {
-      input.focus();
-      input.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
-    });
-  }
-
-  function insertTask() {
-    const input = inputRef.current;
-    if (!input) return;
-    const start = input.selectionStart;
-    const end = input.selectionEnd;
-    const needsNewline = start > 0 && value[start - 1] !== '\n';
-    const prefix = `${needsNewline ? '\n' : ''}- [ ] `;
-    const next = `${value.slice(0, start)}${prefix}${value.slice(end)}`;
-    onChange(next);
-    requestAnimationFrame(() => {
-      input.focus();
-      const cursor = start + prefix.length;
-      input.setSelectionRange(cursor, cursor);
-    });
-  }
-
-  function toggleTask(lineIndex: number) {
-    const next = toggleTaskAtLine(value, lineIndex);
-    if (onToggleTask) onToggleTask(next);
-    else onChange(next);
+  function run(command: () => void) {
+    command();
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-paper">
+    <div
+      className={cn(
+        'markdown-editor overflow-hidden rounded-xl border border-line bg-paper transition-[border-color,box-shadow] duration-150 ease-out',
+        'focus-within:border-ink/25 focus-within:shadow-[0_0_0_3px_rgba(23,26,26,0.05)]',
+      )}
+    >
       <div className="flex h-10 items-center gap-1 border-b border-line-soft px-2">
         <span className="px-1 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
           Markdown
         </span>
-        <div className="ml-auto flex items-center gap-0.5">
-          <ToolButton label="Bold" onClick={() => wrap('**', '**', 'bold text')}>
+        <div className="ml-2 flex items-center gap-0.5">
+          <ToolButton
+            label="Bold"
+            active={editor?.isActive('bold')}
+            onClick={() =>
+              run(() => editor?.chain().focus().toggleBold().run())
+            }
+          >
             <Bold size={14} />
           </ToolButton>
-          <ToolButton label="Italic" onClick={() => wrap('*', '*', 'italic text')}>
+          <ToolButton
+            label="Italic"
+            active={editor?.isActive('italic')}
+            onClick={() =>
+              run(() => editor?.chain().focus().toggleItalic().run())
+            }
+          >
             <Italic size={14} />
           </ToolButton>
-          <ToolButton label="Inline code" onClick={() => wrap('`', '`', 'code')}>
+          <ToolButton
+            label="Inline code"
+            active={editor?.isActive('code')}
+            onClick={() => run(() => editor?.chain().focus().toggleCode().run())}
+          >
             <Code2 size={14} />
           </ToolButton>
-          <ToolButton label="Task list" onClick={insertTask}>
+          <ToolButton
+            label="Task list"
+            active={editor?.isActive('taskList')}
+            onClick={() => run(() => editor?.chain().focus().toggleTaskList().run())}
+          >
             <ListTodo size={14} />
           </ToolButton>
           <ToolButton
             label="Link"
-            onClick={() => wrap('[', '](https://)', 'link text')}
+            active={editor?.isActive('link')}
+            onClick={() => {
+              if (!editor) return;
+              const previous = editor.getAttributes('link').href as string | undefined;
+              const url = window.prompt('Link URL', previous ?? 'https://');
+              if (url === null) return;
+              if (url === '') {
+                editor.chain().focus().extendMarkRange('link').unsetLink().run();
+              } else {
+                editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+              }
+            }}
           >
             <Link2 size={14} />
           </ToolButton>
         </div>
-      </div>
-
-      <textarea
-        ref={inputRef}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-        placeholder={placeholder}
-        rows={6}
-        maxLength={8000}
-        spellCheck
-        aria-label={ariaLabel}
-        className="block min-h-[160px] w-full resize-none overflow-y-auto bg-paper px-4 py-3 text-[16px] leading-6 outline-none placeholder:text-faint sm:text-[14px]"
-      />
-
-      <div className="border-t border-line-soft bg-canvas/35">
-        <div className="flex h-9 items-center gap-2 px-4">
-          <span className="text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
-            Preview
-          </span>
+        <div className="ml-auto flex items-center gap-2">
           {progress.total > 0 && (
             <span
               className={cn(
@@ -124,24 +147,27 @@ export function MarkdownEditor({
             </span>
           )}
         </div>
-        <div className="px-4 pb-4">
-          <MarkdownView
-            source={value}
-            onToggleTask={toggleTask}
-            emptyText="The rendered Markdown appears here."
-          />
-        </div>
       </div>
+
+      {editor ? (
+        <EditorContent editor={editor} className="min-h-[160px] px-4 py-3" />
+      ) : (
+        <div className="flex min-h-[160px] items-center gap-2 px-4 py-3 text-[13px] text-faint">
+          <Loader2 size={14} className="animate-spin" /> Preparing the editor
+        </div>
+      )}
     </div>
   );
 }
 
 function ToolButton({
   label,
+  active,
   onClick,
   children,
 }: {
   label: string;
+  active?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -150,8 +176,12 @@ function ToolButton({
       type="button"
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className="grid size-7 place-items-center rounded-md text-faint transition-colors duration-150 hover:bg-line-soft hover:text-ink"
+      className={cn(
+        'grid size-7 place-items-center rounded-md transition-colors duration-150',
+        active ? 'bg-canvas text-ink' : 'text-faint hover:bg-line-soft hover:text-ink',
+      )}
       aria-label={label}
+      aria-pressed={active}
       title={label}
     >
       {children}

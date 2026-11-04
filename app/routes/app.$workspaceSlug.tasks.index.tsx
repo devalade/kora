@@ -2,8 +2,10 @@ import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-ro
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight,
+  ChevronRight,
   Columns3,
   Command,
+  GripVertical,
   List,
   ListChecks,
   Loader2,
@@ -49,7 +51,7 @@ export const Route = createFileRoute('/app/$workspaceSlug/tasks/')({
 });
 
 type ListItem =
-  | { type: 'group'; status: TaskStatus; count: number }
+  | { type: 'group'; status: TaskStatus; count: number; collapsed: boolean }
   | { type: 'quick-add'; status: TaskStatus }
   | { type: 'issue'; issue: TaskIssue };
 
@@ -64,6 +66,10 @@ function TasksPage() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [quickAddStatus, setQuickAddStatus] = useState<string | null>(null);
+  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(new Set());
+  const [collapseStateLoaded, setCollapseStateLoaded] = useState(false);
+  const [justMovedId, setJustMovedId] = useState<string | null>(null);
+  const justMovedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [updating, setUpdating] = useState(false);
   const requestRef = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -103,18 +109,23 @@ function TasksPage() {
       .map((status) => ({
         status,
         issues: filtered.filter((issue) => issue.status.id === status.id),
+        collapsed: collapsedStatuses.has(status.id),
       }))
       .filter(
         (group) => group.issues.length > 0 || quickAddStatus === group.status.id,
       );
-    return groups.flatMap((group): ListItem[] => [
-      { type: 'group', status: group.status, count: group.issues.length },
-      ...(quickAddStatus === group.status.id
-        ? [{ type: 'quick-add' as const, status: group.status }]
-        : []),
-      ...group.issues.map((issue): ListItem => ({ type: 'issue', issue })),
-    ]);
-  }, [filtered, quickAddStatus, snapshot.statuses]);
+    return groups.flatMap((group): ListItem[] => {
+      const groupItems: ListItem[] = [
+        { type: 'group', status: group.status, count: group.issues.length, collapsed: group.collapsed },
+      ];
+      if (group.collapsed) return groupItems;
+      if (quickAddStatus === group.status.id) {
+        groupItems.push({ type: 'quick-add', status: group.status });
+      }
+      groupItems.push(...group.issues.map((issue): ListItem => ({ type: 'issue', issue })));
+      return groupItems;
+    });
+  }, [collapsedStatuses, filtered, quickAddStatus, snapshot.statuses]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -135,6 +146,12 @@ function TasksPage() {
     if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' });
   }, [grouped, quickAddStatus, virtualizer]);
 
+  useEffect(() => {
+    return () => {
+      if (justMovedTimer.current) clearTimeout(justMovedTimer.current);
+    };
+  }, []);
+
   const loadSnapshot = useCallback(async () => {
     const request = ++requestRef.current;
     try {
@@ -148,6 +165,28 @@ function TasksPage() {
   useEffect(() => {
     setSnapshot(initial);
   }, [initial]);
+
+  const collapseKey = `kora:task-collapsed:${snapshot.workspace.id}`;
+
+  useEffect(() => {
+    setCollapseStateLoaded(false);
+    try {
+      const saved = window.localStorage.getItem(collapseKey);
+      if (saved) setCollapsedStatuses(new Set(JSON.parse(saved) as string[]));
+    } catch {
+      setCollapsedStatuses(new Set());
+    }
+    setCollapseStateLoaded(true);
+  }, [collapseKey]);
+
+  useEffect(() => {
+    if (!collapseStateLoaded) return;
+    try {
+      window.localStorage.setItem(collapseKey, JSON.stringify([...collapsedStatuses]));
+    } catch {
+      // Collapse preferences are a convenience; the view still works without storage.
+    }
+  }, [collapseKey, collapseStateLoaded, collapsedStatuses]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -213,6 +252,12 @@ function TasksPage() {
         item.id === issueId ? { ...item, status } : item,
       ),
     }));
+    setJustMovedId(issueId);
+    if (justMovedTimer.current) clearTimeout(justMovedTimer.current);
+    justMovedTimer.current = setTimeout(() => {
+      justMovedTimer.current = null;
+      setJustMovedId(null);
+    }, 900);
     setUpdating(true);
     try {
       await updateIssueFn({ data: { issueId, statusId } });
@@ -228,6 +273,26 @@ function TasksPage() {
     } finally {
       setUpdating(false);
     }
+  }
+
+  function toggleGroup(statusId: string) {
+    setCollapsedStatuses((current) => {
+      const next = new Set(current);
+      if (next.has(statusId)) next.delete(statusId);
+      else next.add(statusId);
+      return next;
+    });
+    if (quickAddStatus === statusId) setQuickAddStatus(null);
+  }
+
+  function openQuickAdd(statusId: string) {
+    setCollapsedStatuses((current) => {
+      if (!current.has(statusId)) return current;
+      const next = new Set(current);
+      next.delete(statusId);
+      return next;
+    });
+    setQuickAddStatus((current) => (current === statusId ? null : statusId));
   }
 
   useEffect(() => {
@@ -506,6 +571,7 @@ function TasksPage() {
             workspaceSlug={params.workspaceSlug}
             projectFilter={projectFilter}
             activeStatus={statusFilter}
+            justMovedId={justMovedId}
             onMove={(issueId, statusId) => void moveIssue(issueId, statusId)}
           />
         ) : (
@@ -519,9 +585,11 @@ function TasksPage() {
             projectId={projectFilter ?? snapshot.projects[0]?.id ?? ''}
             statusFilter={statusFilter}
             quickAddStatus={quickAddStatus}
-            onQuickAdd={(statusId) =>
-              setQuickAddStatus((current) => (current === statusId ? null : statusId))
-            }
+            collapsedStatuses={collapsedStatuses}
+            justMovedId={justMovedId}
+            onToggleGroup={toggleGroup}
+            onQuickAdd={openQuickAdd}
+            onMove={(issueId, statusId) => void moveIssue(issueId, statusId)}
             onQuickAddCancel={() => setQuickAddStatus(null)}
             onQuickAddCreated={loadSnapshot}
             empty={filtered.length === 0}
@@ -617,7 +685,11 @@ function IssueList({
   projectId,
   statusFilter,
   quickAddStatus,
+  collapsedStatuses,
+  justMovedId,
+  onToggleGroup,
   onQuickAdd,
+  onMove,
   onQuickAddCancel,
   onQuickAddCreated,
   empty,
@@ -634,7 +706,11 @@ function IssueList({
   projectId: string;
   statusFilter?: string;
   quickAddStatus: string | null;
+  collapsedStatuses: Set<string>;
+  justMovedId: string | null;
+  onToggleGroup: (statusId: string) => void;
   onQuickAdd: (statusId: string) => void;
+  onMove: (issueId: string, statusId: string) => void;
   onQuickAddCancel: () => void;
   onQuickAddCreated: () => Promise<void>;
   empty: boolean;
@@ -642,6 +718,9 @@ function IssueList({
   onClearFilters: () => void;
   newIssueSearch: () => { project?: string; status?: string };
 }) {
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
+
   if (empty) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
@@ -682,7 +761,16 @@ function IssueList({
   }
 
   return (
-    <div ref={parentRef} className="scroll-thin min-h-0 flex-1 overflow-auto">
+    <div
+      ref={parentRef}
+      className="scroll-thin min-h-0 flex-1 overflow-auto"
+      onDragOver={(event) => {
+        if (!draggingId) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientY < rect.top + 56) event.currentTarget.scrollBy({ top: -12 });
+        else if (event.clientY > rect.bottom - 56) event.currentTarget.scrollBy({ top: 12 });
+      }}
+    >
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const item = items[virtualItem.index];
@@ -691,12 +779,44 @@ function IssueList({
             return (
               <div
                 key={`group-${item.status.id}`}
-                className="absolute top-0 left-0 flex w-full items-center gap-2 border-b border-line-soft bg-canvas px-4 sm:px-6"
+                className={cn(
+                  'absolute top-0 left-0 flex w-full items-center gap-2 border-b border-line-soft bg-canvas px-4 transition-[background-color,box-shadow] duration-150 sm:px-6',
+                  dragOverStatus === item.status.id && draggingId
+                    ? 'bg-coral-soft/35 shadow-[inset_0_2px_0_var(--color-coral)]'
+                    : '',
+                )}
                 style={{ height: virtualItem.size, transform: `translateY(${virtualItem.start}px)` }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  setDragOverStatus(item.status.id);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const id = event.dataTransfer.getData('text/plain');
+                  setDragOverStatus(null);
+                  setDraggingId(null);
+                  if (id) onMove(id, item.status.id);
+                }}
               >
-                <TaskStatusIcon status={item.status} size={15} />
-                <span className="text-[13px] font-semibold">{item.status.name}</span>
-                <span className="text-[11px] tabular-nums text-faint">{item.count}</span>
+                <button
+                  type="button"
+                  onClick={() => onToggleGroup(item.status.id)}
+                  aria-expanded={!item.collapsed}
+                  aria-label={`${item.collapsed ? 'Expand' : 'Collapse'} ${item.status.name}`}
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 text-left transition-colors duration-150 hover:text-ink"
+                >
+                  <ChevronRight
+                    size={14}
+                    className={cn(
+                      'shrink-0 text-faint transition-transform duration-200 ease-out',
+                      !item.collapsed && 'rotate-90',
+                    )}
+                  />
+                  <TaskStatusIcon status={item.status} size={15} />
+                  <span className="text-[13px] font-semibold">{item.status.name}</span>
+                  <span className="text-[11px] tabular-nums text-faint">{item.count}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => onQuickAdd(item.status.id)}
@@ -737,12 +857,45 @@ function IssueList({
               to="/app/$workspaceSlug/tasks/$issueKey"
               params={{ workspaceSlug, issueKey: issue.key }}
               data-issue-id={issue.id}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', issue.id);
+                setDraggingId(issue.id);
+              }}
+              onDragEnd={() => {
+                setDraggingId(null);
+                setDragOverStatus(null);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                setDragOverStatus(issue.status.id);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const id = event.dataTransfer.getData('text/plain');
+                setDragOverStatus(null);
+                setDraggingId(null);
+                if (id) onMove(id, issue.status.id);
+              }}
               className={cn(
-                'absolute top-0 left-0 flex w-full items-center gap-2 border-b border-line-soft px-4 text-left transition-colors duration-150 sm:px-6',
-                focusedId === issue.id ? 'bg-coral-soft/35' : 'bg-paper hover:bg-canvas',
+                'group absolute top-0 left-0 flex w-full cursor-grab items-center gap-2 border-b border-line-soft px-4 text-left transition-[background-color,opacity] duration-150 active:cursor-grabbing sm:px-6',
+                draggingId === issue.id
+                  ? 'bg-paper opacity-45'
+                  : justMovedId === issue.id
+                    ? 'task-moved'
+                    : dragOverStatus === issue.status.id && draggingId
+                      ? 'bg-coral-soft/20'
+                      : focusedId === issue.id
+                        ? 'bg-coral-soft/35'
+                        : 'bg-paper hover:bg-canvas',
               )}
               style={{ height: virtualItem.size, transform: `translateY(${virtualItem.start}px)` }}
             >
+              <span className="pointer-events-none absolute left-1 top-1/2 -translate-y-1/2 text-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                <GripVertical size={12} />
+              </span>
               <TaskStatusIcon status={issue.status} size={16} />
               <TaskPriorityIcon priority={issue.priority} size={13} />
               <span className="w-[58px] shrink-0 font-mono text-[11px] text-faint">
@@ -910,6 +1063,7 @@ function BoardView({
   workspaceSlug,
   projectFilter,
   activeStatus,
+  justMovedId,
   onMove,
 }: {
   issues: TaskIssue[];
@@ -917,11 +1071,21 @@ function BoardView({
   workspaceSlug: string;
   projectFilter?: string;
   activeStatus?: string;
+  justMovedId: string | null;
   onMove: (id: string, statusId: string) => void;
 }) {
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   return (
-    <div className="scroll-thin flex min-h-0 flex-1 gap-3 overflow-x-auto p-4 sm:p-5">
+    <div
+      className="scroll-thin flex min-h-0 flex-1 gap-3 overflow-x-auto p-4 sm:p-5"
+      onDragOver={(event) => {
+        if (!draggingId) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < rect.left + 56) event.currentTarget.scrollBy({ left: -12 });
+        else if (event.clientX > rect.right - 56) event.currentTarget.scrollBy({ left: 12 });
+      }}
+    >
       {statuses.map((status) => {
         const columnIssues = issues.filter((issue) => issue.status.id === status.id);
         return (
@@ -931,7 +1095,7 @@ function BoardView({
             className={cn(
               'flex w-[282px] shrink-0 flex-col rounded-xl border bg-paper/60 transition-colors duration-150',
               dragOver === status.id
-                ? 'border-ink/25 bg-paper'
+                ? 'border-ink/30 bg-paper shadow-[0_0_0_3px_rgba(239,95,62,0.08)]'
                 : activeStatus === status.id
                   ? 'border-ink/15'
                   : 'border-line/80',
@@ -948,6 +1112,7 @@ function BoardView({
             onDrop={(event) => {
               event.preventDefault();
               setDragOver(null);
+              setDraggingId(null);
               const id = event.dataTransfer.getData('text/plain');
               if (id) onMove(id, status.id);
             }}
@@ -974,8 +1139,17 @@ function BoardView({
                   params={{ workspaceSlug, issueKey: issue.key }}
                   data-issue-id={issue.id}
                   draggable
-                  onDragStart={(event) => event.dataTransfer.setData('text/plain', issue.id)}
-                  className="rounded-xl border border-line/80 bg-paper p-3 text-left shadow-[0_2px_6px_-5px_rgba(23,26,26,0.25)] transition-[border-color,box-shadow] duration-150 hover:border-ink/20 hover:shadow-[0_4px_12px_-8px_rgba(23,26,26,0.3)] active:scale-[0.99]"
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', issue.id);
+                    setDraggingId(issue.id);
+                  }}
+                  onDragEnd={() => setDraggingId(null)}
+                  className={cn(
+                    'cursor-grab rounded-xl border border-line/80 bg-paper p-3 text-left shadow-[0_2px_6px_-5px_rgba(23,26,26,0.25)] transition-[border-color,box-shadow,opacity] duration-150 hover:border-ink/20 hover:shadow-[0_4px_12px_-8px_rgba(23,26,26,0.3)] active:scale-[0.99] active:cursor-grabbing',
+                    draggingId === issue.id && 'opacity-45',
+                    justMovedId === issue.id && 'task-moved',
+                  )}
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[11px] text-faint">{issue.key}</span>

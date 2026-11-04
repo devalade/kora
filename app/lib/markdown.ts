@@ -20,29 +20,3 @@ export function taskProgress(markdown: string): ChecklistProgress {
     done: lines.filter((item) => item.checked).length,
   };
 }
-
-export function toggleTaskLine(markdown: string, index: number) {
-  const target = taskListLines(markdown)[index];
-  if (!target) return markdown;
-  const lines = markdown.split('\n');
-  const line = lines[target.line];
-  if (line === undefined) return markdown;
-  lines[target.line] = line.replace(
-    TASK_LINE,
-    (_, prefix: string, mark: string, suffix: string) =>
-      `${prefix}${mark.toLowerCase() === 'x' ? ' ' : 'x'}${suffix}`,
-  );
-  return lines.join('\n');
-}
-
-export function toggleTaskAtLine(markdown: string, lineIndex: number) {
-  const lines = markdown.split('\n');
-  const line = lines[lineIndex];
-  if (line === undefined) return markdown;
-  lines[lineIndex] = line.replace(
-    TASK_LINE,
-    (_, prefix: string, mark: string, suffix: string) =>
-      `${prefix}${mark.toLowerCase() === 'x' ? ' ' : 'x'}${suffix}`,
-  );
-  return lines.join('\n');
-}
