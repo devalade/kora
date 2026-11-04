@@ -33,6 +33,8 @@ huddles move between them.
 - Workspace search across every channel the signed-in user can see, with arrow-key and Enter navigation
 - Presence, typing indicators, unread badges, and per-channel read state
 - One-click huddles with camera, microphone, screen share, mute, and a participant grid
+- Studio virtual office with rooms, live presence, activity feed, and room huddles
+- Linear-style tasks with a virtualized list, board, command menu, comments, optimistic updates, and keyboard navigation
 - Email and password accounts with hashed passwords and HttpOnly sessions
 - Responsive app shell with a mobile navigation drawer
 
@@ -41,7 +43,7 @@ huddles move between them.
 | Layer | Choice |
 | --- | --- |
 | Framework | Void 1.1 with TanStack Start |
-| UI | React 19, TanStack Router, Tailwind CSS 4, Lucide icons |
+| UI | React 19, TanStack Router, TanStack Virtual, Tailwind CSS 4, Lucide icons |
 | Database | Cloudflare D1 with Drizzle ORM |
 | Files | Cloudflare R2 through `void/storage` |
 | Runtime | Cloudflare Workers |

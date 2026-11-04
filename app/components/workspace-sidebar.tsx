@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Hash,
   LogOut,
+  ListTodo,
   Map as MapIcon,
   MessageSquarePlus,
   Plus,
@@ -195,6 +196,15 @@ export function WorkspaceSidebar({
               <MapIcon size={14} />
               <span className="flex-1">Studio</span>
               <span className="size-1.5 rounded-full bg-mint" />
+            </Link>
+            <Link
+              to="/app/$workspaceSlug/tasks"
+              params={{ workspaceSlug: snapshot.workspace.slug }}
+              onClick={onCloseMobile}
+              className="mt-1.5 flex h-9 w-full items-center gap-2 rounded-lg border border-sidebar-line bg-sidebar/50 px-2.5 text-left text-[12px] font-medium text-sidebar-text transition hover:border-white/20 hover:text-white"
+            >
+              <ListTodo size={14} />
+              <span className="flex-1">Tasks</span>
             </Link>
           </div>
 

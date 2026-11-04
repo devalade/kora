@@ -370,4 +370,168 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       createdAt: at(8),
     },
   ]);
+
+  await db.insert(schema.projects).values([
+    {
+      id: 'p-kora',
+      workspaceId: 'ws-kora',
+      name: 'Kora Tasks',
+      key: 'KOR',
+      description: 'The product work behind Kora.',
+      color: '#EF5F3E',
+      createdBy: 'u-alade',
+      createdAt: at(60 * 24 * 8),
+    },
+    {
+      id: 'p-launch',
+      workspaceId: 'ws-kora',
+      name: 'Launch',
+      key: 'LAU',
+      description: 'Launch week and go-to-market.',
+      color: '#17795F',
+      createdBy: 'u-alade',
+      createdAt: at(60 * 24 * 6),
+    },
+  ]);
+
+  await db.insert(schema.labels).values([
+    { id: 'l-bug', workspaceId: 'ws-kora', name: 'Bug', color: '#D84A2B' },
+    { id: 'l-design', workspaceId: 'ws-kora', name: 'Design', color: '#B07AA1' },
+    { id: 'l-frontend', workspaceId: 'ws-kora', name: 'Frontend', color: '#5B8DEF' },
+    { id: 'l-backend', workspaceId: 'ws-kora', name: 'Backend', color: '#18A999' },
+    { id: 'l-growth', workspaceId: 'ws-kora', name: 'Growth', color: '#E0A23B' },
+    { id: 'l-polish', workspaceId: 'ws-kora', name: 'Polish', color: '#D45D79' },
+  ]);
+
+  const issueRows = [
+    {
+      id: 'i-1', projectId: 'p-kora', number: 1, title: 'Ship the Studio virtual office',
+      description: 'A spatial Studio with rooms, live activity, and a huddle that starts in place.',
+      status: 'done', priority: 2, assigneeId: 'u-alade', createdAt: at(60), updatedAt: at(6),
+    },
+    {
+      id: 'i-2', projectId: 'p-kora', number: 2, title: 'Add live presence to the Studio floor',
+      description: 'Show each person status and what they are doing. Poll every 3s until Durable Objects are available.',
+      status: 'in_progress', priority: 2, assigneeId: 'u-amina', createdAt: at(90), updatedAt: at(3),
+    },
+    {
+      id: 'i-3', projectId: 'p-kora', number: 3, title: 'Fix clipped emoji in the reaction bar',
+      description: 'The quick reaction bar was clipping taller emoji. More room, higher stacking, and a larger hit area.',
+      status: 'done', priority: 1, assigneeId: 'u-alade', createdAt: at(120), updatedAt: at(20),
+    },
+    {
+      id: 'i-4', projectId: 'p-kora', number: 4, title: 'Tasks: list and board views',
+      description: 'List grouped by status with virtualized rows, plus a board. Status changes should be optimistic.',
+      status: 'in_progress', priority: 2, assigneeId: 'u-alade', createdAt: at(80), updatedAt: at(2),
+    },
+    {
+      id: 'i-5', projectId: 'p-kora', number: 5, title: 'Command menu for tasks',
+      description: 'Cmd K to create an issue, jump to a project, or move to chat or Studio.',
+      status: 'todo', priority: 3, assigneeId: 'u-alade', createdAt: at(70), updatedAt: at(8),
+    },
+    {
+      id: 'i-6', projectId: 'p-kora', number: 6, title: 'Comments and activity on issues',
+      description: 'Threaded comments on the issue detail panel with author avatars and timestamps.',
+      status: 'todo', priority: 3, assigneeId: 'u-kwame', createdAt: at(65), updatedAt: at(12),
+    },
+    {
+      id: 'i-7', projectId: 'p-kora', number: 7, title: 'Mobile room list',
+      description: 'At narrow widths, the floor plan becomes a room-by-room list.',
+      status: 'done', priority: 3, assigneeId: 'u-amina', createdAt: at(55), updatedAt: at(15),
+    },
+    {
+      id: 'i-8', projectId: 'p-kora', number: 8, title: 'Agent can pick up a repo issue',
+      description: 'Connect a repo, assign an issue to the agent, and let it open a branch. Permissions and audit trail first.',
+      status: 'backlog', priority: 2, assigneeId: 'u-kwame', createdAt: at(50), updatedAt: at(18),
+    },
+    {
+      id: 'i-9', projectId: 'p-kora', number: 9, title: 'Project covers from Grok',
+      description: 'Use the Grok-generated isometric board as the empty-state cover.',
+      status: 'todo', priority: 4, assigneeId: 'u-zane', createdAt: at(45), updatedAt: at(22),
+    },
+    {
+      id: 'i-10', projectId: 'p-kora', number: 10, title: 'Keyboard shortcuts j/k and c',
+      description: 'C for new issue, J/K to move, Enter to open, Escape to close.',
+      status: 'todo', priority: 3, assigneeId: 'u-alade', createdAt: at(40), updatedAt: at(26),
+    },
+    {
+      id: 'i-11', projectId: 'p-kora', number: 11, title: 'Empty states that feel alive',
+      description: 'Make the empty state feel like a place, not a blank table.',
+      status: 'backlog', priority: 4, assigneeId: 'u-amina', createdAt: at(35), updatedAt: at(30),
+    },
+    {
+      id: 'i-12', projectId: 'p-kora', number: 12, title: 'Search across issues',
+      description: 'Search titles and descriptions across projects.',
+      status: 'todo', priority: 3, assigneeId: 'u-kwame', createdAt: at(30), updatedAt: at(32),
+    },
+    {
+      id: 'i-13', projectId: 'p-launch', number: 1, title: 'Write the launch post',
+      description: 'A short launch post with the Studio screenshot and the task app.',
+      status: 'in_review', priority: 2, assigneeId: 'u-zane', createdAt: at(25), updatedAt: at(2),
+    },
+    {
+      id: 'i-14', projectId: 'p-launch', number: 2, title: 'Landing page copy pass',
+      description: 'Tighten the hero, pricing, and the three feature blocks.',
+      status: 'todo', priority: 3, assigneeId: 'u-amina', createdAt: at(20), updatedAt: at(9),
+    },
+    {
+      id: 'i-15', projectId: 'p-kora', number: 13, title: 'Use a full calendar view',
+      description: 'Not now. The list and board cover the daily loop.',
+      status: 'canceled', priority: 4, assigneeId: null, createdAt: at(60), updatedAt: at(40),
+    },
+  ];
+
+  await db.insert(schema.issues).values(
+    issueRows.map((row) => ({
+      ...row,
+      workspaceId: 'ws-kora',
+      createdBy: 'u-alade',
+    })),
+  );
+
+  await db.insert(schema.issueLabels).values([
+    { issueId: 'i-1', labelId: 'l-design' },
+    { issueId: 'i-1', labelId: 'l-polish' },
+    { issueId: 'i-2', labelId: 'l-frontend' },
+    { issueId: 'i-2', labelId: 'l-design' },
+    { issueId: 'i-3', labelId: 'l-bug' },
+    { issueId: 'i-3', labelId: 'l-polish' },
+    { issueId: 'i-4', labelId: 'l-frontend' },
+    { issueId: 'i-5', labelId: 'l-frontend' },
+    { issueId: 'i-6', labelId: 'l-backend' },
+    { issueId: 'i-7', labelId: 'l-frontend' },
+    { issueId: 'i-7', labelId: 'l-design' },
+    { issueId: 'i-8', labelId: 'l-backend' },
+    { issueId: 'i-9', labelId: 'l-design' },
+    { issueId: 'i-10', labelId: 'l-frontend' },
+    { issueId: 'i-11', labelId: 'l-design' },
+    { issueId: 'i-11', labelId: 'l-polish' },
+    { issueId: 'i-12', labelId: 'l-backend' },
+    { issueId: 'i-13', labelId: 'l-growth' },
+    { issueId: 'i-14', labelId: 'l-growth' },
+    { issueId: 'i-14', labelId: 'l-design' },
+  ]);
+
+  await db.insert(schema.issueComments).values([
+    {
+      id: 'c-1', issueId: 'i-4', userId: 'u-alade',
+      body: 'Board drag is next. List first, then we can reuse the status mutation.',
+      createdAt: at(52),
+    },
+    {
+      id: 'c-2', issueId: 'i-4', userId: 'u-amina',
+      body: 'Keep the rows dense. Linears rhythm comes from the 44px row, not the type.',
+      createdAt: at(44),
+    },
+    {
+      id: 'c-3', issueId: 'i-2', userId: 'u-kwame',
+      body: 'Presence is polling every 3s. I will move it to Durable Objects once we have the realtime layer.',
+      createdAt: at(38),
+    },
+    {
+      id: 'c-4', issueId: 'i-8', userId: 'u-zane',
+      body: 'Start with read-only repo access and a branch, not direct pushes.',
+      createdAt: at(30),
+    },
+  ]);
 });

@@ -139,3 +139,63 @@ export type OfficeSnapshot = {
   studioChannelId: string | null;
   call: CallView | null;
 };
+
+export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'canceled';
+export type TaskPriority = 0 | 1 | 2 | 3 | 4;
+
+export type TaskProject = {
+  id: string;
+  name: string;
+  key: string;
+  color: string;
+  description: string;
+  issueCount: number;
+};
+
+export type TaskLabel = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+export type TaskIssue = {
+  id: string;
+  key: string;
+  number: number;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  project: { id: string; name: string; key: string; color: string };
+  assignee: UserSummary | null;
+  labels: TaskLabel[];
+  commentCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskComment = {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: UserSummary;
+};
+
+export type TasksSnapshot = {
+  workspace: WorkspaceSummary;
+  me: UserSummary;
+  projects: TaskProject[];
+  labels: TaskLabel[];
+  members: UserSummary[];
+  issues: TaskIssue[];
+  counts: {
+    all: number;
+    mine: number;
+    byStatus: Record<TaskStatus, number>;
+  };
+};
+
+export type TaskIssueDetail = {
+  issue: TaskIssue;
+  comments: TaskComment[];
+};

@@ -2,6 +2,7 @@ import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-ro
 import {
   ArrowLeft,
   Coffee,
+  ListTodo,
   Map as MapIcon,
   MapPin,
   Menu,
@@ -536,11 +537,20 @@ function OfficeShell({
               <MapIcon size={18} />
             </span>
             <Link
+              to="/app/$workspaceSlug/tasks"
+              params={{ workspaceSlug: office.workspace.slug }}
+              className="grid size-10 place-items-center rounded-xl text-sidebar-text transition hover:bg-white/10 hover:text-white"
+              aria-label="Tasks"
+              title="Tasks"
+            >
+              <ListTodo size={18} />
+            </Link>
+            <Link
               to="/app/$workspaceSlug"
               params={{ workspaceSlug: office.workspace.slug }}
               className="grid size-10 place-items-center rounded-xl text-sidebar-text transition hover:bg-white/10 hover:text-white"
-              aria-label="Back to channels"
-              title="Back to channels"
+              aria-label="Chat"
+              title="Chat"
             >
               <MessageSquare size={18} />
             </Link>

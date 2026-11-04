@@ -249,3 +249,97 @@ export const officeActivities = sqliteTable(
   },
   (table) => [index('office_activities_workspace_idx').on(table.workspaceId, table.createdAt)],
 );
+
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    key: text('key').notNull(),
+    description: text('description').notNull().default(''),
+    color: text('color').notNull().default('#EF5F3E'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [
+    uniqueIndex('projects_workspace_key_idx').on(table.workspaceId, table.key),
+    index('projects_workspace_idx').on(table.workspaceId),
+  ],
+);
+
+export const issues = sqliteTable(
+  'issues',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    title: text('title').notNull(),
+    description: text('description').notNull().default(''),
+    status: text('status').notNull().default('todo'),
+    priority: integer('priority').notNull().default(0),
+    assigneeId: text('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: text('created_at').notNull().default(nowIso),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [
+    uniqueIndex('issues_project_number_idx').on(table.projectId, table.number),
+    index('issues_workspace_status_idx').on(table.workspaceId, table.status),
+    index('issues_assignee_idx').on(table.assigneeId),
+  ],
+);
+
+export const labels = sqliteTable(
+  'labels',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    color: text('color').notNull().default('#736F66'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [uniqueIndex('labels_workspace_name_idx').on(table.workspaceId, table.name)],
+);
+
+export const issueLabels = sqliteTable(
+  'issue_labels',
+  {
+    issueId: text('issue_id')
+      .notNull()
+      .references(() => issues.id, { onDelete: 'cascade' }),
+    labelId: text('label_id')
+      .notNull()
+      .references(() => labels.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.issueId, table.labelId] })],
+);
+
+export const issueComments = sqliteTable(
+  'issue_comments',
+  {
+    id: text('id').primaryKey(),
+    issueId: text('issue_id')
+      .notNull()
+      .references(() => issues.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [index('issue_comments_issue_idx').on(table.issueId, table.createdAt)],
+);
