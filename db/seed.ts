@@ -6,6 +6,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
   const passwordHash = await hashPassword('demo1234');
   const now = Date.now();
   const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
+  const day = (offset: number) => new Date(now + offset * 86_400_000).toISOString().slice(0, 10);
 
   const people = [
     {
@@ -488,14 +489,59 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       description: 'Not now. The list and board cover the daily loop.',
       status: 'canceled', priority: 4, assigneeId: null, createdAt: at(60), updatedAt: at(40),
     },
+    {
+      id: 'i-16', projectId: 'p-kora', number: 14, title: 'Virtualize the issue list',
+      description: 'Keep the list fast as the workspace grows.',
+      status: 'done', priority: 3, assigneeId: 'u-alade', parentIssueId: 'i-4',
+      createdAt: at(70), updatedAt: at(18),
+    },
+    {
+      id: 'i-17', projectId: 'p-kora', number: 15, title: 'Board drag and drop',
+      description: 'Move cards between workflow statuses with optimistic feedback.',
+      status: 'in_progress', priority: 2, assigneeId: 'u-amina', parentIssueId: 'i-4',
+      createdAt: at(68), updatedAt: at(4),
+    },
+    {
+      id: 'i-18', projectId: 'p-kora', number: 16, title: 'Keyboard shortcuts',
+      description: 'C, J, K, Enter, and Escape should work across every task view.',
+      status: 'todo', priority: 3, assigneeId: 'u-alade', parentIssueId: 'i-4',
+      createdAt: at(66), updatedAt: at(11),
+    },
   ];
 
+  const issueDates: Record<string, [number, number]> = {
+    'i-1': [-21, -14],
+    'i-2': [-4, 3],
+    'i-3': [-18, -16],
+    'i-4': [-2, 5],
+    'i-5': [2, 9],
+    'i-6': [0, 11],
+    'i-7': [-12, -8],
+    'i-8': [5, 16],
+    'i-9': [1, 7],
+    'i-10': [-1, 4],
+    'i-11': [8, 18],
+    'i-12': [3, 14],
+    'i-13': [-6, 2],
+    'i-14': [-2, 6],
+    'i-15': [-20, -10],
+    'i-16': [-2, 1],
+    'i-17': [0, 3],
+    'i-18': [1, 5],
+  };
+
   await db.insert(schema.issues).values(
-    issueRows.map((row) => ({
-      ...row,
-      workspaceId: 'ws-kora',
-      createdBy: 'u-alade',
-    })),
+    issueRows.map((row) => {
+      const dates = issueDates[row.id] ?? [0, 7];
+      return {
+        ...row,
+        workspaceId: 'ws-kora',
+        createdBy: 'u-alade',
+        startDate: day(dates[0]),
+        dueDate: day(dates[1]),
+        parentIssueId: (row as { parentIssueId?: string }).parentIssueId ?? null,
+      };
+    }),
   );
 
   await db.insert(schema.issueLabels).values([
@@ -519,6 +565,9 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     { issueId: 'i-13', labelId: 'l-growth' },
     { issueId: 'i-14', labelId: 'l-growth' },
     { issueId: 'i-14', labelId: 'l-design' },
+    { issueId: 'i-16', labelId: 'l-frontend' },
+    { issueId: 'i-17', labelId: 'l-frontend' },
+    { issueId: 'i-18', labelId: 'l-frontend' },
   ]);
 
   await db.insert(schema.issueComments).values([

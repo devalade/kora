@@ -10,16 +10,26 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  ListTree,
   Loader2,
   Menu,
   MessageSquare,
+  Plus,
   Send,
   Trash2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
-import { addTaskCommentFn, deleteIssueFn, getIssueFn, getTasksFn, updateIssueFn } from '../lib/tasks';
+import {
+  addTaskCommentFn,
+  createIssueFn,
+  deleteIssueFn,
+  getIssueFn,
+  getTasksFn,
+  touchIssueEditorFn,
+  updateIssueFn,
+} from '../lib/tasks';
 import type {
   TaskIssue,
   TaskIssueDetail,
@@ -29,7 +39,7 @@ import type {
 } from '../lib/types';
 import { relativeTime } from '../lib/format';
 import { taskProgress } from '../lib/markdown';
-import { Avatar } from '../components/avatar';
+import { Avatar, AvatarStack } from '../components/avatar';
 import { LabelPicker } from '../components/label-picker';
 import { MarkdownEditor } from '../components/markdown-editor';
 import { Modal } from '../components/modal';
@@ -63,6 +73,8 @@ type IssuePatch = {
   priority?: TaskPriority;
   assigneeId?: string | null;
   labelIds?: string[];
+  startDate?: string | null;
+  dueDate?: string | null;
 };
 
 function IssuePage() {
@@ -80,6 +92,8 @@ function IssuePage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [subIssueTitle, setSubIssueTitle] = useState('');
+  const [addingSubIssue, setAddingSubIssue] = useState(false);
   const descriptionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestIssueRef = useRef(initialDetail.issue);
 
@@ -97,6 +111,52 @@ function IssuePage() {
     setTitle(initialDetail.issue.title);
     setDescription(initialDetail.issue.description);
   }, [initialDetail]);
+
+  useEffect(() => {
+    const ping = () => {
+      if (document.visibilityState === 'visible') {
+        void touchIssueEditorFn({ data: { issueId: issue.id } }).catch(() => undefined);
+      }
+    };
+    ping();
+    const timer = setInterval(ping, 5000);
+    return () => clearInterval(timer);
+  }, [issue.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const next = await getIssueFn({
+          data: { slug: snapshot.workspace.slug, issueKey: issue.key },
+        });
+        if (cancelled) return;
+        const active = document.activeElement;
+        const editingDescription = Boolean(active?.closest('.tiptap'));
+        const editingTitle =
+          active instanceof HTMLInputElement && active.getAttribute('aria-label') === 'Issue title';
+        setDetail((current) => ({
+          ...next,
+          issue: {
+            ...next.issue,
+            description: editingDescription ? current.issue.description : next.issue.description,
+          },
+        }));
+        if (!editingDescription && !descriptionTimer.current) {
+          setDescription(next.issue.description);
+        }
+        if (!editingTitle) setTitle(next.issue.title);
+      } catch {
+        // The next poll recovers a dropped read.
+      }
+    };
+    const timer = setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [issue.id, issue.key, snapshot.workspace.slug]);
 
   function applyPatch(current: TaskIssue, patch: IssuePatch): TaskIssue {
     return {
@@ -126,6 +186,8 @@ function IssuePage() {
             ),
           }
         : {}),
+      ...(patch.startDate !== undefined ? { startDate: patch.startDate } : {}),
+      ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate } : {}),
     };
   }
 
@@ -188,6 +250,33 @@ function IssuePage() {
         : { ...current, issue: { ...current.issue, labels: [...current.issue.labels, label] } },
     );
     void router.invalidate();
+  }
+
+  async function createSubIssue() {
+    const next = subIssueTitle.trim();
+    if (!next || addingSubIssue) return;
+    setAddingSubIssue(true);
+    try {
+      const result = await createIssueFn({
+        data: {
+          slug: snapshot.workspace.slug,
+          projectId: issue.project.id,
+          title: next,
+          description: '',
+          priority: 0,
+          assigneeId: null,
+          labelIds: [],
+          parentIssueId: issue.id,
+        },
+      });
+      setSubIssueTitle('');
+      await router.invalidate();
+      toast.success(`${result.key} added as a sub-issue.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not add the sub-issue.');
+    } finally {
+      setAddingSubIssue(false);
+    }
   }
 
   async function submitComment() {
@@ -285,6 +374,20 @@ function IssuePage() {
             <span className="font-mono text-[11px] text-faint">{issue.key}</span>
           </span>
           <div className="ml-auto flex items-center gap-1.5">
+            {detail.editors.some((editor) => editor.id !== snapshot.me.id) && (
+              <div className="hidden items-center gap-2 sm:flex">
+                <AvatarStack
+                  people={detail.editors.filter((editor) => editor.id !== snapshot.me.id)}
+                  max={3}
+                  size="xs"
+                />
+                <span className="text-[11px] text-muted">
+                  {detail.editors.filter((editor) => editor.id !== snapshot.me.id).length === 1
+                    ? `${detail.editors.find((editor) => editor.id !== snapshot.me.id)?.name.split(' ')[0]} editing`
+                    : `${detail.editors.filter((editor) => editor.id !== snapshot.me.id).length} editing`}
+                </span>
+              </div>
+            )}
             {saving && (
               <span className="hidden items-center gap-1.5 text-[11px] text-faint sm:flex">
                 <Loader2 size={12} className="animate-spin" /> Saving
@@ -315,6 +418,19 @@ function IssuePage() {
           <div className="mx-auto w-full max-w-[1180px] px-4 py-8 sm:px-8 lg:px-12 lg:py-12">
             <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-12">
               <article className="min-w-0">
+                {detail.parent && (
+                  <Link
+                    to="/app/$workspaceSlug/tasks/$issueKey"
+                    params={{ workspaceSlug: params.workspaceSlug, issueKey: detail.parent.key }}
+                    className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-md text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+                  >
+                    <ListTree size={13} />
+                    <span>Sub-issue of</span>
+                    <span className="font-mono text-[11px] text-faint">{detail.parent.key}</span>
+                    <span className="truncate">{detail.parent.title}</span>
+                  </Link>
+                )}
+
                 <div className="flex items-center gap-2 text-[12px] text-muted">
                   <span
                     className="size-2 rounded-full"
@@ -357,6 +473,79 @@ function IssuePage() {
                   patchIssue={patchIssue}
                   onLabelCreated={addLabelToIssue}
                 />
+                </div>
+
+                <div className="mt-8 border-t border-line pt-6">
+                  <div className="flex items-center gap-2">
+                    <ListTree size={14} className="text-muted" />
+                    <h2 className="text-[13px] font-semibold">Sub-issues</h2>
+                    <span className="text-[11px] text-faint">{detail.subIssues.length}</span>
+                    {detail.subIssues.length > 0 && (
+                      <span className="ml-auto text-[11px] tabular-nums text-muted">
+                        {detail.subIssues.filter((child) => child.status.category === 'completed').length}{' '}
+                        of {detail.subIssues.length} done
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-3 ml-2 overflow-hidden rounded-xl border border-line bg-paper">
+                    {detail.subIssues.length === 0 && (
+                      <p className="px-3 py-3 text-[12px] text-muted">
+                        Break this issue into smaller pieces when it helps.
+                      </p>
+                    )}
+                    {detail.subIssues.map((child) => (
+                      <Link
+                        key={child.id}
+                        to="/app/$workspaceSlug/tasks/$issueKey"
+                        params={{ workspaceSlug: params.workspaceSlug, issueKey: child.key }}
+                        className="flex items-center gap-2 border-b border-line-soft py-2.5 pr-3 pl-5 transition-colors duration-150 last:border-b-0 hover:bg-canvas"
+                      >
+                        <TaskStatusIcon status={child.status} size={15} />
+                        <span className="w-[52px] shrink-0 font-mono text-[10px] text-faint">
+                          {child.key}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">
+                          {child.title}
+                        </span>
+                        {child.assignee ? (
+                          <Avatar
+                            name={child.assignee.name}
+                            color={child.assignee.avatarColor}
+                            size="xs"
+                          />
+                        ) : (
+                          <span className="size-6 rounded-full border border-dashed border-line" />
+                        )}
+                      </Link>
+                    ))}
+                  </div>
+
+                  <div className="mt-2 ml-2 flex items-center gap-2">
+                    <input
+                      value={subIssueTitle}
+                      onChange={(event) => setSubIssueTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void createSubIssue();
+                        }
+                      }}
+                      placeholder="Add a sub-issue and press Enter"
+                      maxLength={200}
+                      aria-label="Sub-issue title"
+                      className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-paper px-3 text-[16px] outline-none transition-[border-color,box-shadow] duration-150 focus:border-ink/25 focus:shadow-[0_0_0_3px_rgba(23,26,26,0.05)] sm:h-9 sm:text-[13px]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void createSubIssue()}
+                      disabled={!subIssueTitle.trim() || addingSubIssue}
+                      className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-semibold text-paper transition-[background-color,opacity] duration-150 hover:bg-ink-soft disabled:opacity-40 sm:h-9"
+                    >
+                      {addingSubIssue ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                      Add
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-10 border-t border-line pt-6">
@@ -566,6 +755,34 @@ function IssueProperties({
         </div>
 
         <div>
+          <p className="text-[12px] font-medium text-muted">Dates</p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="mb-1 block text-[10px] text-faint">Start</span>
+              <input
+                type="date"
+                value={issue.startDate ?? ''}
+                onChange={(event) =>
+                  void patchIssue({ startDate: event.target.value || null })
+                }
+                aria-label="Start date"
+                className="h-10 min-w-0 w-full rounded-lg border border-line bg-paper px-2 text-[16px] outline-none transition-[border-color,box-shadow] duration-150 focus:border-ink/25 focus:shadow-[0_0_0_3px_rgba(23,26,26,0.05)] sm:h-9 sm:text-[12px]"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] text-faint">Due</span>
+              <input
+                type="date"
+                value={issue.dueDate ?? ''}
+                onChange={(event) => void patchIssue({ dueDate: event.target.value || null })}
+                aria-label="Due date"
+                className="h-10 min-w-0 w-full rounded-lg border border-line bg-paper px-2 text-[16px] outline-none transition-[border-color,box-shadow] duration-150 focus:border-ink/25 focus:shadow-[0_0_0_3px_rgba(23,26,26,0.05)] sm:h-9 sm:text-[12px]"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div>
           <p className="text-[12px] font-medium text-muted">Labels</p>
           <div className="mt-2">
             <LabelPicker
@@ -592,6 +809,9 @@ function IssueProperties({
         <MetaRow label="Comments" value={String(issue.commentCount)} />
         {checklist.total > 0 && (
           <MetaRow label="Checklist" value={`${checklist.done} of ${checklist.total}`} />
+        )}
+        {issue.subIssueCount > 0 && (
+          <MetaRow label="Sub-issues" value={`${issue.subIssueDone} of ${issue.subIssueCount}`} />
         )}
       </div>
     </div>

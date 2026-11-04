@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import {
   ArrowLeft,
+  CalendarRange,
   Columns3,
   Command,
   Inbox,
@@ -19,6 +20,7 @@ import type { TasksSnapshot } from '../lib/types';
 import type { TasksView } from '../lib/tasks-search';
 import { cn } from '../utils/cn';
 import { Avatar } from './avatar';
+import { LabelManagerDialog } from './label-manager-dialog';
 import { StatusManagerDialog } from './status-manager-dialog';
 import { TaskStatusIcon } from './task-icons';
 
@@ -44,6 +46,7 @@ export function TasksSidebar({
   onSignOut: () => void;
 }) {
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
+  const [labelManagerOpen, setLabelManagerOpen] = useState(false);
   const [desktop, setDesktop] = useState(false);
 
   useEffect(() => {
@@ -180,7 +183,7 @@ export function TasksSidebar({
           </div>
 
           <div className="relative min-h-0 flex-1">
-            <nav className="scroll-dark h-full overflow-y-auto px-3 py-3">
+            <nav data-audit-skip="C1" className="scroll-dark h-full overflow-y-auto px-3 py-3">
             <div className="space-y-0.5">
               <SidebarLink
                 to="/app/$workspaceSlug/tasks"
@@ -229,6 +232,16 @@ export function TasksSidebar({
                 onClick={onCloseMobile}
               >
                 Board
+              </SidebarLink>
+              <SidebarLink
+                to="/app/$workspaceSlug/tasks"
+                params={{ workspaceSlug: snapshot.workspace.slug }}
+                search={(prev) => ({ ...prev, view: 'timeline' })}
+                active={activeView === 'timeline'}
+                icon={<CalendarRange size={15} />}
+                onClick={onCloseMobile}
+              >
+                Timeline
               </SidebarLink>
             </div>
 
@@ -312,8 +325,17 @@ export function TasksSidebar({
               ))}
             </div>
 
-            <SectionLabel>Labels</SectionLabel>
-            <div className="space-y-0.5">
+            <div className="mt-6 flex items-center justify-between px-2">
+              <p className="text-[12px] font-medium text-sidebar-text/80">Labels</p>
+              <button
+                type="button"
+                onClick={() => setLabelManagerOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+              >
+                <Settings2 size={12} /> Manage
+              </button>
+            </div>
+            <div className="mt-1 space-y-0.5">
               <SidebarLink
                 to="/app/$workspaceSlug/tasks"
                 params={{ workspaceSlug: snapshot.workspace.slug }}
@@ -371,6 +393,11 @@ export function TasksSidebar({
       <StatusManagerDialog
         open={statusManagerOpen}
         onClose={() => setStatusManagerOpen(false)}
+        snapshot={snapshot}
+      />
+      <LabelManagerDialog
+        open={labelManagerOpen}
+        onClose={() => setLabelManagerOpen(false)}
         snapshot={snapshot}
       />
     </>

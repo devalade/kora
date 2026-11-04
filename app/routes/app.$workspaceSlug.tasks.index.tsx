@@ -2,12 +2,14 @@ import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-ro
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight,
+  CalendarRange,
   ChevronRight,
   Columns3,
   Command,
   GripVertical,
   List,
   ListChecks,
+  ListTree,
   Loader2,
   Menu,
   MessageSquare,
@@ -370,16 +372,20 @@ function TasksPage() {
       ? selectedStatus.name
       : view === 'board'
         ? 'Board'
-        : view === 'mine'
-          ? 'My issues'
-          : 'All issues';
+        : view === 'timeline'
+          ? 'Timeline'
+          : view === 'mine'
+            ? 'My issues'
+            : 'All issues';
   const subtitle = selectedProject
     ? selectedProject.description
     : view === 'mine'
       ? 'Assigned to you'
       : view === 'board'
         ? 'Move work through your workflow'
-        : 'The work behind Kora';
+        : view === 'timeline'
+          ? 'Plan the weeks around what matters'
+          : 'The work behind Kora';
   const hasFilters = Boolean(projectFilter || labelFilter || statusFilter || query.trim());
 
   return (
@@ -462,6 +468,13 @@ function TasksPage() {
               </ViewButton>
               <ViewButton active={view === 'board'} onClick={() => go({ view: 'board' })} label="Board">
                 <Columns3 size={15} />
+              </ViewButton>
+              <ViewButton
+                active={view === 'timeline'}
+                onClick={() => go({ view: 'timeline' })}
+                label="Timeline"
+              >
+                <CalendarRange size={15} />
               </ViewButton>
             </div>
 
@@ -573,6 +586,11 @@ function TasksPage() {
             activeStatus={statusFilter}
             justMovedId={justMovedId}
             onMove={(issueId, statusId) => void moveIssue(issueId, statusId)}
+          />
+        ) : view === 'timeline' ? (
+          <TimelineView
+            issues={filtered}
+            workspaceSlug={params.workspaceSlug}
           />
         ) : (
           <IssueList
@@ -917,6 +935,7 @@ function IssueList({
                   description={issue.description}
                   className="hidden text-[11px] sm:flex"
                 />
+                <SubIssueBadge issue={issue} className="hidden text-[11px] sm:flex" />
                 <span className="hidden w-12 text-right text-[11px] text-faint sm:block">
                   {relativeTime(issue.updatedAt)}
                 </span>
@@ -957,6 +976,23 @@ function ChecklistBadge({
     >
       <ListChecks size={12} />
       {progress.done}/{progress.total}
+    </span>
+  );
+}
+
+function SubIssueBadge({ issue, className }: { issue: TaskIssue; className?: string }) {
+  if (issue.subIssueCount === 0) return null;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 tabular-nums',
+        issue.subIssueDone === issue.subIssueCount ? 'text-mint-deep' : 'text-faint',
+        className,
+      )}
+      title={`${issue.subIssueDone} of ${issue.subIssueCount} sub-issues done`}
+    >
+      <ListTree size={12} />
+      {issue.subIssueDone}/{issue.subIssueCount}
     </span>
   );
 }
@@ -1053,6 +1089,262 @@ function QuickAddRow({
         {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
         Add
       </button>
+    </div>
+  );
+}
+
+const DAY_WIDTH = 36;
+const TIMELINE_LEFT = 300;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+function parseDate(value: string | null): Date | null {
+  if (!value) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function dateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+function addDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function startOfWeek(date: Date) {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const offset = (next.getDay() + 6) % 7;
+  next.setDate(next.getDate() - offset);
+  return next;
+}
+
+function daysBetween(from: Date, to: Date) {
+  return Math.round(
+    (new Date(to.getFullYear(), to.getMonth(), to.getDate()).getTime() -
+      new Date(from.getFullYear(), from.getMonth(), from.getDate()).getTime()) /
+      86_400_000,
+  );
+}
+
+function shortRange(issue: TaskIssue) {
+  const start = parseDate(issue.startDate);
+  const due = parseDate(issue.dueDate);
+  if (!start && !due) return null;
+  const first = start ?? due!;
+  const last = due ?? start!;
+  return { first, last };
+}
+
+function TimelineView({
+  issues,
+  workspaceSlug,
+}: {
+  issues: TaskIssue[];
+  workspaceSlug: string;
+}) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const scheduled = issues
+    .map((issue) => ({ issue, range: shortRange(issue) }))
+    .filter((entry): entry is { issue: TaskIssue; range: { first: Date; last: Date } } =>
+      Boolean(entry.range),
+    );
+  const unscheduled = issues.filter((issue) => !shortRange(issue));
+
+  const anchors = scheduled.flatMap((entry) => [entry.range.first, entry.range.last]);
+  const minAnchor = anchors.length
+    ? new Date(Math.min(...anchors.map((date) => date.getTime())))
+    : addDays(today, -7);
+  const maxAnchor = anchors.length
+    ? new Date(Math.max(...anchors.map((date) => date.getTime())))
+    : addDays(today, 28);
+  const rangeStart = startOfWeek(
+    new Date(Math.min(minAnchor.getTime(), addDays(today, -7).getTime())),
+  );
+  const rangeEnd = addDays(
+    startOfWeek(new Date(Math.max(maxAnchor.getTime(), addDays(today, 28).getTime()))),
+    6,
+  );
+  const days = Array.from({ length: daysBetween(rangeStart, rangeEnd) + 1 }, (_, index) =>
+    addDays(rangeStart, index),
+  );
+  const todayIndex = daysBetween(rangeStart, today);
+
+  const months: { key: string; label: string; days: number }[] = [];
+  for (const day of days) {
+    const key = `${day.getFullYear()}-${day.getMonth()}`;
+    const current = months[months.length - 1];
+    if (current?.key === key) current.days += 1;
+    else {
+      months.push({
+        key,
+        label: `${MONTHS[day.getMonth()]} ${day.getFullYear()}`,
+        days: 1,
+      });
+    }
+  }
+
+  const ordered = [
+    ...scheduled.sort(
+      (a, b) => a.range.first.getTime() - b.range.first.getTime() || a.issue.number - b.issue.number,
+    ),
+    ...unscheduled.map((issue) => ({ issue, range: null })),
+  ];
+
+  if (issues.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
+        <div className="grid size-12 place-items-center rounded-2xl bg-coral-soft text-coral">
+          <CalendarRange size={22} />
+        </div>
+        <h2 className="mt-4 text-xl font-semibold tracking-[-0.025em]">Nothing to schedule</h2>
+        <p className="mt-1 max-w-sm text-[13px] leading-5 text-muted">
+          Add issues and give them dates, then they will appear on this timeline.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div data-audit-skip="C2 C3" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="scroll-thin min-h-0 flex-1 overflow-auto">
+        <div className="min-w-max">
+          <div className="sticky top-0 z-30 flex h-11 border-b border-line bg-paper">
+            <div className="sticky left-0 z-40 flex w-[300px] shrink-0 items-center border-r border-line bg-paper px-4 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
+              Issues
+            </div>
+            {months.map((month) => (
+              <div
+                key={month.key}
+                className="flex items-center border-r border-line-soft px-3 text-[11px] font-medium text-muted"
+                style={{ width: month.days * DAY_WIDTH }}
+              >
+                {month.label}
+              </div>
+            ))}
+          </div>
+
+          <div className="sticky top-11 z-20 flex h-8 border-b border-line bg-canvas/60">
+            <div className="sticky left-0 z-30 flex w-[300px] shrink-0 items-center border-r border-line bg-canvas px-4 text-[10px] text-faint">
+              Schedule
+            </div>
+            {days.map((day) => {
+              const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+              const isToday = dateKey(day) === dateKey(today);
+              return (
+                <div
+                  key={dateKey(day)}
+                  className={cn(
+                    'relative flex h-full shrink-0 flex-col items-center justify-center border-r border-line/30 text-[9px] text-faint',
+                    isWeekend && 'bg-canvas/80',
+                    isToday && 'bg-coral-soft/60 text-coral-deep',
+                  )}
+                  style={{ width: DAY_WIDTH }}
+                >
+                  <span className="leading-none">{WEEKDAYS[day.getDay()]}</span>
+                  <span className={cn('mt-1 leading-none', isToday && 'font-semibold')}>
+                    {day.getDate()}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="relative">
+            {todayIndex >= 0 && todayIndex < days.length && (
+              <div
+                className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-coral/35"
+                style={{ left: TIMELINE_LEFT + todayIndex * DAY_WIDTH + DAY_WIDTH / 2 }}
+              />
+            )}
+
+            {ordered.map(({ issue, range }) => {
+              const start = range?.first ?? null;
+              const due = range?.last ?? null;
+              const startIndex = start ? daysBetween(rangeStart, start) : -1;
+              const dueIndex = due ? daysBetween(rangeStart, due) : -1;
+              return (
+                <div
+                  key={issue.id}
+                  className="group flex h-12 border-b border-line-soft bg-paper"
+                >
+                  <Link
+                    to="/app/$workspaceSlug/tasks/$issueKey"
+                    params={{ workspaceSlug, issueKey: issue.key }}
+                    className="sticky left-0 z-20 flex w-[300px] shrink-0 items-center gap-2 border-r border-line bg-paper px-3 transition-colors duration-150 group-hover:bg-canvas sm:px-4"
+                  >
+                    <TaskStatusIcon status={issue.status} size={14} />
+                    <span className="w-[52px] shrink-0 font-mono text-[10px] text-faint">
+                      {issue.key}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
+                      {issue.title}
+                    </span>
+                    {issue.assignee ? (
+                      <Avatar
+                        name={issue.assignee.name}
+                        color={issue.assignee.avatarColor}
+                        size="xs"
+                      />
+                    ) : (
+                      <span className="size-6 shrink-0 rounded-full border border-dashed border-line" />
+                    )}
+                  </Link>
+
+                  <div
+                    className="relative flex h-full shrink-0"
+                    style={{ width: days.length * DAY_WIDTH }}
+                  >
+                    {days.map((day) => {
+                      const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                      const isToday = dateKey(day) === dateKey(today);
+                      return (
+                        <div
+                          key={dateKey(day)}
+                          className={cn(
+                            'h-full shrink-0 border-r border-line/25',
+                            isWeekend && 'bg-canvas/35',
+                            isToday && 'bg-coral-soft/20',
+                          )}
+                          style={{ width: DAY_WIDTH }}
+                        />
+                      );
+                    })}
+
+                    {range && startIndex >= 0 && dueIndex >= 0 ? (
+                      <Link
+                        to="/app/$workspaceSlug/tasks/$issueKey"
+                        params={{ workspaceSlug, issueKey: issue.key }}
+                        className="absolute top-2.5 z-10 flex h-7 items-center overflow-hidden rounded-md border px-2 text-[10px] font-medium shadow-[0_1px_2px_rgba(23,26,26,0.06)] transition-[filter,transform] duration-150 hover:brightness-[0.98] active:scale-[0.99]"
+                        style={{
+                          left: startIndex * DAY_WIDTH + 2,
+                          width: Math.max(DAY_WIDTH - 4, (dueIndex - startIndex + 1) * DAY_WIDTH - 4),
+                          background: `color-mix(in oklab, ${issue.status.color} 16%, var(--color-paper))`,
+                          borderColor: `color-mix(in oklab, ${issue.status.color} 34%, var(--color-line))`,
+                          color: `color-mix(in oklab, ${issue.status.color} 56%, var(--color-ink))`,
+                        }}
+                        title={`${issue.key}: ${issue.title}`}
+                      >
+                        <span className="truncate">{issue.title}</span>
+                      </Link>
+                    ) : (
+                      <span className="absolute top-1/2 left-3 -translate-y-1/2 text-[10px] text-faint">
+                        No dates
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1168,6 +1460,7 @@ function BoardView({
                     </span>
                     <span className="ml-auto flex shrink-0 items-center gap-2">
                       <ChecklistBadge description={issue.description} className="text-[11px]" />
+                      <SubIssueBadge issue={issue} className="text-[11px]" />
                       {issue.assignee ? (
                         <Avatar
                           name={issue.assignee.name}

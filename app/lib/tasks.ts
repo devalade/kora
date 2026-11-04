@@ -1,7 +1,8 @@
 import { createServerFn } from '@tanstack/react-start';
-import { and, asc, db, desc, eq, inArray, sql } from 'void/db';
+import { and, asc, db, desc, eq, gt, inArray, sql } from 'void/db';
 import {
   issueComments,
+  issueEditors,
   issueLabels,
   issues,
   labels,
@@ -35,6 +36,7 @@ import type {
 
 const PRIORITIES = [0, 1, 2, 3, 4] as const;
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a six digit hex color.');
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-11-04.');
 
 function colorForLabel(name: string) {
   let hash = 0;
@@ -53,6 +55,9 @@ const issueSelection = {
   statusColor: taskStatuses.color,
   statusPosition: taskStatuses.position,
   priority: issues.priority,
+  startDate: issues.startDate,
+  dueDate: issues.dueDate,
+  parentId: issues.parentIssueId,
   projectId: issues.projectId,
   projectName: projects.name,
   projectKey: projects.key,
@@ -80,6 +85,9 @@ type IssueRow = {
   statusColor: string;
   statusPosition: number;
   priority: number;
+  startDate: string | null;
+  dueDate: string | null;
+  parentId: string | null;
   projectId: string;
   projectName: string;
   projectKey: string;
@@ -167,6 +175,11 @@ function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: numb
       position: row.statusPosition,
     },
     priority: (PRIORITIES.includes(row.priority as TaskPriority) ? row.priority : 0) as TaskPriority,
+    startDate: row.startDate,
+    dueDate: row.dueDate,
+    parentId: row.parentId,
+    subIssueCount: 0,
+    subIssueDone: 0,
     project: {
       id: row.projectId,
       name: row.projectName,
@@ -226,7 +239,13 @@ async function commentCountsFor(issueIds: string[]) {
 
 async function requireIssue(issueId: string, userId: string) {
   const [row] = await db
-    .select({ id: issues.id, workspaceId: issues.workspaceId, projectId: issues.projectId })
+    .select({
+      id: issues.id,
+      workspaceId: issues.workspaceId,
+      projectId: issues.projectId,
+      startDate: issues.startDate,
+      dueDate: issues.dueDate,
+    })
     .from(issues)
     .where(eq(issues.id, issueId));
   if (!row) throw new Error('Issue not found.');
@@ -298,7 +317,7 @@ function toComment(row: {
 }
 
 async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
-  const [labelMap, commentMap, commentRows] = await Promise.all([
+  const [labelMap, commentMap, commentRows, childRows, parentRow, editorRows] = await Promise.all([
     issueLabelsFor([row.id]),
     commentCountsFor([row.id]),
     db
@@ -319,11 +338,59 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       .innerJoin(users, eq(users.id, issueComments.userId))
       .where(eq(issueComments.issueId, row.id))
       .orderBy(asc(issueComments.createdAt)),
+    db
+      .select(issueSelection)
+      .from(issues)
+      .innerJoin(projects, eq(projects.id, issues.projectId))
+      .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+      .leftJoin(users, eq(users.id, issues.assigneeId))
+      .where(eq(issues.parentIssueId, row.id))
+      .orderBy(asc(issues.number)),
+    row.parentId
+      ? db
+          .select(issueSelection)
+          .from(issues)
+          .innerJoin(projects, eq(projects.id, issues.projectId))
+          .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+          .leftJoin(users, eq(users.id, issues.assigneeId))
+          .where(eq(issues.id, row.parentId))
+      : Promise.resolve([]),
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        avatarColor: users.avatarColor,
+        title: users.title,
+        statusEmoji: users.statusEmoji,
+        statusText: users.statusText,
+        lastSeenAt: users.lastSeenAt,
+      })
+      .from(issueEditors)
+      .innerJoin(users, eq(users.id, issueEditors.userId))
+      .where(
+        and(
+          eq(issueEditors.issueId, row.id),
+          gt(issueEditors.updatedAt, new Date(Date.now() - 15_000).toISOString()),
+        ),
+      ),
   ]);
 
+  const subIssues = childRows.map((child) =>
+    toIssue(child, [], 0),
+  );
+  const subIssueDone = subIssues.filter((child) => child.status.category === 'completed').length;
+  const parent = parentRow[0] ? toIssue(parentRow[0], [], 0) : null;
   return {
-    issue: toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
+    issue: {
+      ...toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
+      subIssueCount: subIssues.length,
+      subIssueDone,
+    },
     comments: commentRows.map(toComment),
+    parent,
+    subIssues,
+    editors: editorRows.map((editor) => toUserSummary(editor)),
   };
 }
 
@@ -363,8 +430,21 @@ export const getTasksFn = createServerFn({ method: 'GET' })
     const issueViews = issueRows.map((row) =>
       toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
     );
-    const projectCounts = new Map<string, number>();
+    const subIssueCounts = new Map<string, { total: number; done: number }>();
     for (const issue of issueViews) {
+      if (!issue.parentId) continue;
+      const counts = subIssueCounts.get(issue.parentId) ?? { total: 0, done: 0 };
+      counts.total += 1;
+      if (issue.status.category === 'completed') counts.done += 1;
+      subIssueCounts.set(issue.parentId, counts);
+    }
+    const issuesWithSubIssues = issueViews.map((issue) => ({
+      ...issue,
+      subIssueCount: subIssueCounts.get(issue.id)?.total ?? 0,
+      subIssueDone: subIssueCounts.get(issue.id)?.done ?? 0,
+    }));
+    const projectCounts = new Map<string, number>();
+    for (const issue of issuesWithSubIssues) {
       projectCounts.set(issue.project.id, (projectCounts.get(issue.project.id) ?? 0) + 1);
     }
     const projectsView: TaskProject[] = projectRows.map((project) => ({
@@ -379,7 +459,7 @@ export const getTasksFn = createServerFn({ method: 'GET' })
     const byStatus: Record<string, number> = Object.fromEntries(
       statuses.map((status) => [status.id, 0]),
     );
-    for (const issue of issueViews) {
+    for (const issue of issuesWithSubIssues) {
       byStatus[issue.status.id] = (byStatus[issue.status.id] ?? 0) + 1;
     }
 
@@ -396,13 +476,30 @@ export const getTasksFn = createServerFn({ method: 'GET' })
       labels: labelRows.map((label) => ({ id: label.id, name: label.name, color: label.color })),
       statuses,
       members,
-      issues: issueViews,
+      issues: issuesWithSubIssues,
       counts: {
-        all: issueViews.length,
-        mine: issueViews.filter((issue) => issue.assignee?.id === me.id).length,
+        all: issuesWithSubIssues.length,
+        mine: issuesWithSubIssues.filter((issue) => issue.assignee?.id === me.id).length,
         byStatus,
       },
     } satisfies TasksSnapshot;
+  });
+
+export const touchIssueEditorFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ issueId: z.string() }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    await requireIssue(data.issueId, me.id);
+    const now = new Date().toISOString();
+    await db
+      .insert(issueEditors)
+      .values({ issueId: data.issueId, userId: me.id, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [issueEditors.issueId, issueEditors.userId],
+        set: { updatedAt: now },
+      });
+    return { ok: true as const };
   });
 
 export const getIssueFn = createServerFn({ method: 'GET' })
@@ -426,16 +523,31 @@ export const createIssueFn = createServerFn({ method: 'POST' })
       priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(0),
       assigneeId: z.string().nullable().optional(),
       labelIds: z.array(z.string()).default([]),
+      parentIssueId: z.string().nullable().optional(),
+      startDate: dateSchema.nullable().optional(),
+      dueDate: dateSchema.nullable().optional(),
     }),
   )
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
+    let projectId = data.projectId;
+    if (data.parentIssueId) {
+      const [parent] = await db
+        .select({ id: issues.id, workspaceId: issues.workspaceId, projectId: issues.projectId })
+        .from(issues)
+        .where(eq(issues.id, data.parentIssueId));
+      if (!parent || parent.workspaceId !== workspace.id) throw new Error('Parent issue not found.');
+      projectId = parent.projectId;
+    }
+    if (data.startDate && data.dueDate && data.dueDate < data.startDate) {
+      throw new Error('The due date cannot be before the start date.');
+    }
     const [project] = await db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, data.projectId), eq(projects.workspaceId, workspace.id)));
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspace.id)));
     if (!project) throw new Error('Project not found.');
 
     const status = data.statusId
@@ -472,6 +584,9 @@ export const createIssueFn = createServerFn({ method: 'POST' })
       status: status.id,
       priority: data.priority,
       assigneeId: data.assigneeId ?? null,
+      parentIssueId: data.parentIssueId ?? null,
+      startDate: data.startDate ?? null,
+      dueDate: data.dueDate ?? null,
       createdBy: me.id,
     });
 
@@ -501,6 +616,8 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
       priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
       assigneeId: z.string().nullable().optional(),
       labelIds: z.array(z.string()).optional(),
+      startDate: dateSchema.nullable().optional(),
+      dueDate: dateSchema.nullable().optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -538,6 +655,13 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
     if (data.statusId !== undefined) set.status = data.statusId;
     if (data.priority !== undefined) set.priority = data.priority;
     if (data.assigneeId !== undefined) set.assigneeId = data.assigneeId;
+    if (data.startDate !== undefined) set.startDate = data.startDate;
+    if (data.dueDate !== undefined) set.dueDate = data.dueDate;
+    const nextStart = data.startDate !== undefined ? data.startDate : issue.startDate;
+    const nextDue = data.dueDate !== undefined ? data.dueDate : issue.dueDate;
+    if (nextStart && nextDue && nextDue < nextStart) {
+      throw new Error('The due date cannot be before the start date.');
+    }
     await db.update(issues).set(set).where(eq(issues.id, data.issueId));
 
     if (data.labelIds !== undefined) {
@@ -566,6 +690,7 @@ export const deleteIssueFn = createServerFn({ method: 'POST' })
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     await requireIssue(data.issueId, me.id);
+    await db.update(issues).set({ parentIssueId: null }).where(eq(issues.parentIssueId, data.issueId));
     await db.delete(issues).where(eq(issues.id, data.issueId));
     return { ok: true as const };
   });
@@ -647,6 +772,50 @@ export const createLabelFn = createServerFn({ method: 'POST' })
         .onConflictDoNothing();
     }
     return { label, created };
+  });
+
+export const updateLabelFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      labelId: z.string(),
+      name: z.string().trim().min(1).max(30).optional(),
+      color: colorSchema.optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const [label] = await db.select().from(labels).where(eq(labels.id, data.labelId));
+    if (!label) throw new Error('Label not found.');
+    await requireWorkspace(label.workspaceId, me.id);
+    if (data.name && data.name.toLowerCase() !== label.name.toLowerCase()) {
+      const rows = await db
+        .select({ id: labels.id, name: labels.name })
+        .from(labels)
+        .where(eq(labels.workspaceId, label.workspaceId));
+      if (rows.some((row) => row.name.toLowerCase() === data.name?.toLowerCase())) {
+        throw new Error('A label with that name already exists.');
+      }
+    }
+    const set: Record<string, unknown> = {};
+    if (data.name !== undefined) set.name = data.name;
+    if (data.color !== undefined) set.color = data.color;
+    if (Object.keys(set).length > 0) {
+      await db.update(labels).set(set).where(eq(labels.id, data.labelId));
+    }
+    return { ok: true as const };
+  });
+
+export const deleteLabelFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ labelId: z.string() }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const [label] = await db.select().from(labels).where(eq(labels.id, data.labelId));
+    if (!label) throw new Error('Label not found.');
+    await requireWorkspace(label.workspaceId, me.id);
+    await db.delete(labels).where(eq(labels.id, data.labelId));
+    return { ok: true as const };
   });
 
 export const createTaskStatusFn = createServerFn({ method: 'POST' })

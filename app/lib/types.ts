@@ -173,6 +173,11 @@ export type TaskIssue = {
   description: string;
   status: TaskStatus;
   priority: TaskPriority;
+  startDate: string | null;
+  dueDate: string | null;
+  parentId: string | null;
+  subIssueCount: number;
+  subIssueDone: number;
   project: { id: string; name: string; key: string; color: string };
   assignee: UserSummary | null;
   labels: TaskLabel[];
@@ -206,4 +211,7 @@ export type TasksSnapshot = {
 export type TaskIssueDetail = {
   issue: TaskIssue;
   comments: TaskComment[];
+  parent: TaskIssue | null;
+  subIssues: TaskIssue[];
+  editors: UserSummary[];
 };

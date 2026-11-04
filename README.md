@@ -37,6 +37,10 @@ huddles move between them.
 - Linear-style tasks with a virtualized list, board, full issue pages, a dedicated new issue page, comments, optimistic updates, and keyboard navigation
 - A live Markdown editor with clickable task lists and checklist progress in the editor, list, and board
 - Collapsible status groups and drag-and-drop status changes in both the list and board views
+- Timeline view with start and due dates, month and day rails, and unscheduled issues
+- Sub-issues with parent links, quick creation, and progress in the issue, list, and board
+- A label manager for renaming, recoloring, adding, and removing workspace labels
+- Live editor presence and cross-user issue updates while an issue is open
 - Quick-add rows for new issues and inline label creation, both with Enter to submit
 - A workspace workflow editor for adding, renaming, recoloring, reordering, and deleting custom statuses
 - Email and password accounts with hashed passwords and HttpOnly sessions

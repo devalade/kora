@@ -1,6 +1,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  CalendarRange,
   Columns3,
   CornerDownLeft,
   Layers,
@@ -36,7 +37,7 @@ export function TaskCommandMenu({
   onClose: () => void;
   snapshot: TasksSnapshot;
   onNewIssue: () => void;
-  onView: (view: 'all' | 'mine' | 'board') => void;
+  onView: (view: 'all' | 'mine' | 'board' | 'timeline') => void;
   onProject: (projectId: string) => void;
   onChat: () => void;
   onStudio: () => void;
@@ -50,6 +51,7 @@ export function TaskCommandMenu({
     { id: 'all', label: 'Go to All issues', icon: Layers, run: () => onView('all') },
     { id: 'mine', label: 'Go to My issues', icon: UserRound, run: () => onView('mine') },
     { id: 'board', label: 'Go to Board', icon: Columns3, run: () => onView('board') },
+    { id: 'timeline', label: 'Go to Timeline', icon: CalendarRange, run: () => onView('timeline') },
     ...snapshot.projects.map((project) => ({
       id: `project-${project.id}`,
       label: `Go to ${project.name}`,

@@ -100,7 +100,7 @@ export function PropertySelect({
           }
         }}
         className={cn(
-          'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 text-left text-[13px] font-medium text-ink-soft transition-[border-color,box-shadow,background-color] duration-150 ease-out hover:border-ink/20 disabled:opacity-50',
+          'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-left text-[13px] font-medium text-ink-soft transition-[border-color,box-shadow,background-color] duration-150 ease-out hover:border-ink/20 disabled:opacity-50',
           open && 'border-ink/25 bg-paper shadow-[0_0_0_3px_rgba(23,26,26,0.05)]',
         )}
       >

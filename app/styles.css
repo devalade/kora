@@ -390,7 +390,7 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  margin-top: 3px;
+  margin-top: 4px;
 }
 
 .tiptap ul[data-type='taskList'] li > div {

@@ -1,4 +1,4 @@
-export type TasksView = 'all' | 'mine' | 'board';
+export type TasksView = 'all' | 'mine' | 'board' | 'timeline';
 
 export type TasksSearch = {
   view?: TasksView;
@@ -7,11 +7,14 @@ export type TasksSearch = {
   status?: string;
 };
 
-export const TASKS_VIEWS: TasksView[] = ['all', 'mine', 'board'];
+export const TASKS_VIEWS: TasksView[] = ['all', 'mine', 'board', 'timeline'];
 
 export function validateTasksSearch(search: Record<string, unknown>): TasksSearch {
   const view =
-    search.view === 'mine' || search.view === 'board' || search.view === 'all'
+    search.view === 'mine' ||
+    search.view === 'board' ||
+    search.view === 'timeline' ||
+    search.view === 'all'
       ? search.view
       : 'all';
   return {

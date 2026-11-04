@@ -306,6 +306,9 @@ export const issues = sqliteTable(
     description: text('description').notNull().default(''),
     status: text('status').notNull().default('todo'),
     priority: integer('priority').notNull().default(0),
+    startDate: text('start_date'),
+    dueDate: text('due_date'),
+    parentIssueId: text('parent_issue_id'),
     assigneeId: text('assignee_id').references(() => users.id, { onDelete: 'set null' }),
     createdBy: text('created_by')
       .notNull()
@@ -317,6 +320,25 @@ export const issues = sqliteTable(
     uniqueIndex('issues_project_number_idx').on(table.projectId, table.number),
     index('issues_workspace_status_idx').on(table.workspaceId, table.status),
     index('issues_assignee_idx').on(table.assigneeId),
+    index('issues_parent_idx').on(table.parentIssueId),
+    index('issues_dates_idx').on(table.workspaceId, table.startDate, table.dueDate),
+  ],
+);
+
+export const issueEditors = sqliteTable(
+  'issue_editors',
+  {
+    issueId: text('issue_id')
+      .notNull()
+      .references(() => issues.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [
+    primaryKey({ columns: [table.issueId, table.userId] }),
+    index('issue_editors_issue_idx').on(table.issueId, table.updatedAt),
   ],
 );
 
