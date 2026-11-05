@@ -128,7 +128,7 @@ export function LabelManagerDialog({
       onClose={onClose}
       width="max-w-2xl"
       title="Labels"
-      description="Group issues across projects with a shared workspace vocabulary."
+      description="Group issues across teams with a shared workspace vocabulary."
     >
       <div className="space-y-2">
         {snapshot.labels.map((label) => {

@@ -1,5 +1,7 @@
 import { memo, useMemo, type ReactNode } from 'react';
-import type { UserSummary } from '../lib/types';
+import type { IssueRef, UserSummary } from '../lib/types';
+import { IssueChip } from './issue-embed';
+import { CodeBlock } from './code-block';
 import { mentionHandle, mentionLookup } from '../lib/mentions';
 import { cn } from '../utils/cn';
 
@@ -14,11 +16,13 @@ const INLINE_SOURCE = [
   'https?:\\/\\/[^\\s<"]+',
   '(?<![\\w.-])@[A-Za-z0-9._-]+',
   '(?<![\\w.-])#[a-z0-9][a-z0-9-]*',
+  '(?<![\\w@#./-])[A-Z][A-Z0-9]{1,4}-\\d{1,6}(?![\\w-])',
 ].join('|');
 
 type InlineContext = {
   lookup: Map<string, Pick<UserSummary, 'id' | 'name' | 'email' | 'title' | 'online'>>;
   channelNames?: Set<string>;
+  issues?: Map<string, IssueRef>;
   meId?: string;
   onMentionClick?: (userId: string) => void;
 };
@@ -84,7 +88,7 @@ function renderInline(
             rel="noreferrer noopener"
             className="font-medium text-mint-deep underline decoration-mint-deep/30 underline-offset-2 hover:decoration-mint-deep"
           >
-            {renderInline(link[1], context, tokenKey, depth + 1)}
+            {renderInline(link[1], { ...context, issues: undefined }, tokenKey, depth + 1)}
           </a>,
         );
       } else {
@@ -158,6 +162,9 @@ function renderInline(
           {token}
         </span>,
       );
+    } else if (/^[A-Z]/.test(token)) {
+      const issue = context.issues?.get(token);
+      parts.push(issue ? <IssueChip key={tokenKey} issue={issue} /> : token);
     } else {
       parts.push(token);
     }
@@ -165,6 +172,11 @@ function renderInline(
   }
   if (lastIndex < text.length) parts.push(text.slice(lastIndex));
   return parts;
+}
+
+function isEmbeddedKeyLine(line: string, context: { issues?: Map<string, IssueRef> }) {
+  const key = line.trim();
+  return /^[A-Z][A-Z0-9]{1,4}-\d{1,6}$/.test(key) && Boolean(context.issues?.get(key));
 }
 
 function isBlockStart(line: string) {
@@ -190,6 +202,11 @@ function renderBlocks(body: string, context: InlineContext) {
       index += 1;
       continue;
     }
+    // A key alone on its line becomes an embed card under the message; showing a chip too repeats it.
+    if (isEmbeddedKeyLine(line, context)) {
+      index += 1;
+      continue;
+    }
 
     const fence = line.match(/^\s*```([\w-]*)\s*$/);
     if (fence) {
@@ -200,14 +217,7 @@ function renderBlocks(body: string, context: InlineContext) {
         index += 1;
       }
       if (index < lines.length) index += 1;
-      blocks.push(
-        <pre
-          key={`block-${key++}`}
-          className="overflow-x-auto rounded-[10px] bg-sidebar px-3 py-2.5 font-mono text-[12px] leading-5 text-sidebar-bright"
-        >
-          <code>{code.join('\n')}</code>
-        </pre>,
-      );
+      blocks.push(<CodeBlock key={`block-${key++}`} code={code.join('\n')} language={fence[1]} />);
       continue;
     }
 
@@ -294,7 +304,12 @@ function renderBlocks(body: string, context: InlineContext) {
 
     const paragraph: string[] = [line];
     index += 1;
-    while (index < lines.length && lines[index].trim() && !isBlockStart(lines[index])) {
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !isBlockStart(lines[index]) &&
+      !isEmbeddedKeyLine(lines[index], context)
+    ) {
       paragraph.push(lines[index]);
       index += 1;
     }
@@ -316,19 +331,25 @@ function renderBlocks(body: string, context: InlineContext) {
 export const RichText = memo(function RichText({
   body,
   channelNames,
+  issues,
   members,
   meId,
   onMentionClick,
 }: {
   body: string;
   channelNames?: Set<string>;
+  issues?: IssueRef[];
   members?: UserSummary[];
   meId?: string;
   onMentionClick?: (userId: string) => void;
 }) {
   const lookup = useMemo(() => mentionLookup(members ?? []), [members]);
+  const issueMap = useMemo(
+    () => (issues && issues.length > 0 ? new Map(issues.map((issue) => [issue.key, issue])) : undefined),
+    [issues],
+  );
   if (!body) return null;
-  const context: InlineContext = { lookup, channelNames, meId, onMentionClick };
+  const context: InlineContext = { lookup, channelNames, issues: issueMap, meId, onMentionClick };
   return (
     <div className="break-words">
       <div className="space-y-1.5">{renderBlocks(body, context)}</div>

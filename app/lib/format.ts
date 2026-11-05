@@ -1,20 +1,33 @@
-export function clockTime(iso: string) {
-  return new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+// Pass timeZone 'UTC' while hydrating so the browser's first render matches the Worker's,
+// then omit it to show the viewer's local time. See useDisplayTimeZone.
+export function clockTime(iso: string, timeZone?: string) {
+  return new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit', timeZone }).format(
+    new Date(iso),
+  );
 }
 
-export function dayLabel(iso: string) {
+function dayKey(date: Date, timeZone?: string) {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone,
+  }).format(date);
+}
+
+export function dayLabel(iso: string, timeZone?: string) {
   const date = new Date(iso);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  if (sameDay(date, today)) return 'Today';
-  if (sameDay(date, yesterday)) return 'Yesterday';
-  const sameYear = date.getFullYear() === today.getFullYear();
+  const now = new Date();
+  const key = dayKey(date, timeZone);
+  if (key === dayKey(now, timeZone)) return 'Today';
+  if (key === dayKey(new Date(now.getTime() - 86_400_000), timeZone)) return 'Yesterday';
+  const sameYear = key.slice(0, 4) === dayKey(now, timeZone).slice(0, 4);
   return new Intl.DateTimeFormat('en', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
     year: sameYear ? undefined : 'numeric',
+    timeZone,
   }).format(date);
 }
 
@@ -35,8 +48,9 @@ export function relativeTime(iso: string) {
   return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(new Date(iso));
 }
 
-export function fullDate(iso: string) {
+export function fullDate(iso: string, timeZone?: string) {
   return new Intl.DateTimeFormat('en', {
+    timeZone,
     weekday: 'short',
     month: 'short',
     day: 'numeric',

@@ -33,7 +33,7 @@ await composer.fill(marker);
 await composer.press('Enter');
 await page.getByText(marker, { exact: true }).waitFor({ timeout: 10000 });
 
-await page.getByRole('button', { name: /3 replies/i }).first().click();
+await page.getByRole('button', { name: /\d+ replies/i }).first().click();
 await page.getByText('Thread', { exact: true }).waitFor({ timeout: 5000 });
 await page.getByPlaceholder('Reply in thread').waitFor({ timeout: 10000 });
 await page.waitForTimeout(800);

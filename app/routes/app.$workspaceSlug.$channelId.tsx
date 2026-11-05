@@ -196,10 +196,11 @@ function WorkspacePage() {
     lastMessageId.current = last;
   }, [messages]);
 
+  // The list is bottom-anchored in CSS (column-reverse), where scrollTop 0 is the newest message.
+  // Switching channels resets to it; the first paint, server HTML included, already starts there.
   useEffect(() => {
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-    });
+    stickRef.current = true;
+    scrollRef.current?.scrollTo({ top: 0 });
   }, [params.channelId]);
 
   useEffect(() => {
@@ -254,20 +255,14 @@ function WorkspacePage() {
     if (!first) return;
     const targetChannelId = channel.id;
     setLoadingMore(true);
-    const element = scrollRef.current;
-    const previousHeight = element?.scrollHeight ?? 0;
-    const previousTop = element?.scrollTop ?? 0;
     try {
       const page = await getChannelPageFn({
         data: { channelId: targetChannelId, before: first.createdAt },
       });
       if (paramsRef.current.channelId !== targetChannelId) return;
+      // Older messages are added above; the bottom-anchored list keeps the view where it is.
       setOlder((current) => [...page.messages, ...current]);
       setHasMore(page.hasMore);
-      requestAnimationFrame(() => {
-        if (!element) return;
-        element.scrollTop = element.scrollHeight - previousHeight + previousTop;
-      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not load earlier messages.');
     } finally {
@@ -468,9 +463,10 @@ function WorkspacePage() {
               onScroll={() => {
                 const element = scrollRef.current;
                 if (!element) return;
-                stickRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 140;
+                // column-reverse: scrollTop is 0 at the bottom and negative above it.
+                stickRef.current = Math.abs(element.scrollTop) < 140;
               }}
-              className="scroll-thin min-h-0 flex-1 overflow-y-auto"
+              className="scroll-thin flex min-h-0 flex-1 flex-col-reverse overflow-y-auto"
             >
               <div className="mx-auto max-w-[980px]">
                 <ChannelIntro

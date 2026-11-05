@@ -1,13 +1,16 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { getThreadFn, sendMessageFn, toggleReactionFn } from '../lib/chat';
+import { getThreadFn, sendMessageFn, setTypingFn, toggleReactionFn } from '../lib/chat';
 import type { MessageView, ThreadView, UserSummary } from '../lib/types';
 import { Avatar } from './avatar';
 import { clockTime, fullDate, plural } from '../lib/format';
 import { MessageComposer } from './message-composer';
+import { IssueEmbeds } from './issue-embed';
 import { MessageLinkPreviews } from './link-preview';
+import { TypingRow } from './message-list';
 import { RichText } from './rich-text';
+import { useDisplayTimeZone } from '../lib/use-display-time-zone';
 import { cn } from '../utils/cn';
 
 export function ThreadPanel({
@@ -30,6 +33,7 @@ export function ThreadPanel({
   const [thread, setThread] = useState<ThreadView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const typingSentAt = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +74,20 @@ export function ThreadPanel({
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : 'Reaction failed.');
     }
+  }
+
+  function onTyping(active: boolean) {
+    const parent = thread?.parent;
+    if (!parent) return;
+    if (active) {
+      if (Date.now() - typingSentAt.current < 2000) return;
+      typingSentAt.current = Date.now();
+    } else {
+      typingSentAt.current = 0;
+    }
+    void setTypingFn({ data: { channelId: parent.channelId, threadId: parent.id, active } }).catch(
+      () => undefined,
+    );
   }
 
   async function reply(body: string, attachmentIds: string[]) {
@@ -135,13 +153,16 @@ export function ThreadPanel({
       </div>
 
       <div className="border-t border-line p-3">
+        {thread && thread.typing.length > 0 && (
+          <TypingRow people={thread.typing} className="px-1 pb-2" />
+        )}
         <MessageComposer
           compact
           channelLabel={`#${channelName}`}
           placeholder="Reply in thread"
           members={members}
           onSend={reply}
-          onTyping={() => undefined}
+          onTyping={onTyping}
         />
       </div>
     </aside>
@@ -163,24 +184,27 @@ function ThreadMessage({
   onMentionClick?: (userId: string) => void;
   large?: boolean;
 }) {
+  const timeZone = useDisplayTimeZone();
   return (
     <article className={cn('flex gap-3', large && 'rounded-2xl bg-canvas p-3')}>
       <Avatar name={message.author.name} color={message.author.avatarColor} size={large ? 'md' : 'sm'} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-[13.5px] font-semibold">{message.author.name}</span>
-          <span className="text-[11px] text-faint tabular-nums" title={fullDate(message.createdAt)}>
-            {clockTime(message.createdAt)}
+          <span className="text-[11px] text-faint tabular-nums" title={fullDate(message.createdAt, timeZone)}>
+            {clockTime(message.createdAt, timeZone)}
           </span>
         </div>
         <div className="mt-0.5 text-[13.5px] leading-6 text-ink-soft">
           <RichText
             body={message.body}
+            issues={message.issues}
             members={members}
             meId={meId}
             onMentionClick={onMentionClick}
           />
         </div>
+        <IssueEmbeds body={message.body} issues={message.issues} compact />
         <MessageLinkPreviews body={message.body} compact />
         {message.attachments.length > 0 && (
           <div className="mt-2 space-y-1.5">

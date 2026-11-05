@@ -29,7 +29,7 @@ export function TaskCommandMenu({
   snapshot,
   onNewIssue,
   onView,
-  onProject,
+  onTeam,
   onChat,
   onStudio,
 }: {
@@ -38,7 +38,7 @@ export function TaskCommandMenu({
   snapshot: TasksSnapshot;
   onNewIssue: () => void;
   onView: (view: 'all' | 'mine' | 'board' | 'timeline') => void;
-  onProject: (projectId: string) => void;
+  onTeam: (teamId: string) => void;
   onChat: () => void;
   onStudio: () => void;
 }) {
@@ -52,12 +52,12 @@ export function TaskCommandMenu({
     { id: 'mine', label: 'Go to My issues', icon: UserRound, run: () => onView('mine') },
     { id: 'board', label: 'Go to Board', icon: Columns3, run: () => onView('board') },
     { id: 'timeline', label: 'Go to Timeline', icon: CalendarRange, run: () => onView('timeline') },
-    ...snapshot.projects.map((project) => ({
-      id: `project-${project.id}`,
-      label: `Go to ${project.name}`,
-      hint: project.key,
+    ...snapshot.teams.map((team) => ({
+      id: `team-${team.id}`,
+      label: `Go to ${team.name}`,
+      hint: team.key,
       icon: Layers,
-      run: () => onProject(project.id),
+      run: () => onTeam(team.id),
     })),
     { id: 'chat', label: 'Go to Chat', icon: MessageSquare, run: onChat },
     { id: 'studio', label: 'Go to Studio', icon: Map, run: onStudio },

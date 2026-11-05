@@ -26,22 +26,29 @@ huddles move between them.
 
 ## Features
 
+- One navigation rail on every page, always in the same order: Inbox, Chat, Tasks, Studio
+- An Inbox of what happened to you: assignments, comments and status changes on issues you follow, mentions, and thread replies
 - Workspaces with invite codes, public channels, private channels, and direct messages
 - Message threads with reply counts that update live
 - @mention autocomplete for workspace teammates, with mention badges in the sidebar
 - Markdown messages with bold, italic, strikethrough, inline code, code blocks, lists, quotes, and links
 - Link previews that unfurl the page title, description, site name, and Open Graph image
+- Issue references: type `#` in chat to pick an issue; `KOR-12` renders as a live chip, a key on its own line as an embed card, and the issue's history shows where it was mentioned
 - Emoji reactions, channel links, and seeded demo conversations
 - File and image uploads with live progress, thumbnail previews, and a fullscreen image lightbox
 - Workspace search across every channel the signed-in user can see, with arrow-key and Enter navigation
 - Presence, typing indicators, unread badges, and per-channel read state
 - One-click huddles with camera, microphone, screen share, mute, and a participant grid
 - Studio virtual office with rooms, live presence, activity feed, and room huddles
-- Linear-style tasks with a virtualized list, board, full issue pages, a dedicated new issue page, comments, optimistic updates, and keyboard navigation
+- Linear-style tasks with a virtualized list, board, full issue pages, a New issue modal (press C anywhere), comments, optimistic updates, and keyboard navigation
+- Teams own the issue key (KOR-12) and every issue belongs to one team; Projects group issues from any team with a status, lead, target date and progress
+- An issue history line: every change (status, priority, assignee, labels, project, parent, dates, title) is recorded and shown between comments
+- Searchable property pickers with number shortcuts, a label multi-select that can create labels, and a parent-issue picker
+- Sub-issues are ordinary issues: attach any existing issue, change or clear its parent, or detach it
 - A live Markdown editor with clickable task lists and checklist progress in the editor, list, and board
 - Collapsible status groups and drag-and-drop status changes in both the list and board views
 - Timeline view with start and due dates, month and day rails, and unscheduled issues
-- Sub-issues with parent links, quick creation, and progress in the issue, list, and board
+- Sub-issue progress in the issue, list, and board
 - A label manager for renaming, recoloring, adding, and removing workspace labels
 - Live editor presence and cross-user issue updates while an issue is open
 - Quick-add rows for new issues and inline label creation, both with Enter to submit
@@ -100,7 +107,12 @@ db/
 
 Server state lives in `db/schema.ts`. The main tables are users, sessions, workspaces,
 workspace members, channels, channel members, messages, reactions, attachments, calls, call
-participants, and call signals.
+participants, and call signals. Tasks use teams (which own the issue key), projects, issues,
+issue labels, issue comments, issue events (the history line), and notifications (the inbox).
+
+Issue references are stored as plain text (`KOR-12`) and resolved when messages are read, so they
+stay readable anywhere and their status is always current. History and inbox rows are written by
+the helpers in `app/lib/activity.ts`.
 
 Every server function checks the session and channel membership before reading or writing. File URLs
 are authenticated and checked against the channel that owns the message.
@@ -162,6 +174,8 @@ data.
 - TURN is optional. Without `VITE_TURN_*` credentials, some restrictive networks will fail to connect calls.
 - Email invites, push notifications, message editing, and message deletion are not built yet.
 - Search uses `LIKE` and is intended for small teams, not large message archives.
+- Inbox items for a chat message open the channel, not the exact message.
+- Project updates (status, lead, dates) are not recorded in an issue's history.
 
 ## License
 

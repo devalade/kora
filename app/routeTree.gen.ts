@@ -19,11 +19,13 @@ import { Route as JoinCodeRouteImport } from './routes/join.$code'
 import { Route as ApiFilesIdRouteImport } from './routes/api.files.$id'
 import { Route as AppWorkspaceSlugIndexRouteImport } from './routes/app.$workspaceSlug.index'
 import { Route as AppWorkspaceSlugChannelIdRouteImport } from './routes/app.$workspaceSlug.$channelId'
+import { Route as AppWorkspaceSlugInboxRouteImport } from './routes/app.$workspaceSlug.inbox'
 import { Route as AppWorkspaceSlugOfficeRouteImport } from './routes/app.$workspaceSlug.office'
 import { Route as AppWorkspaceSlugTasksRouteImport } from './routes/app.$workspaceSlug.tasks'
 import { Route as AppWorkspaceSlugTasksIndexRouteImport } from './routes/app.$workspaceSlug.tasks.index'
 import { Route as AppWorkspaceSlugTasksIssueKeyRouteImport } from './routes/app.$workspaceSlug.tasks.$issueKey'
 import { Route as AppWorkspaceSlugTasksNewRouteImport } from './routes/app.$workspaceSlug.tasks.new'
+import { Route as AppWorkspaceSlugTasksProjectsRouteImport } from './routes/app.$workspaceSlug.tasks.projects'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -76,6 +78,11 @@ const AppWorkspaceSlugChannelIdRoute =
     path: '/app/$workspaceSlug/$channelId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AppWorkspaceSlugInboxRoute = AppWorkspaceSlugInboxRouteImport.update({
+  id: '/app/$workspaceSlug/inbox',
+  path: '/app/$workspaceSlug/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppWorkspaceSlugOfficeRoute = AppWorkspaceSlugOfficeRouteImport.update({
   id: '/app/$workspaceSlug/office',
   path: '/app/$workspaceSlug/office',
@@ -104,6 +111,12 @@ const AppWorkspaceSlugTasksNewRoute =
     path: '/new',
     getParentRoute: () => AppWorkspaceSlugTasksRoute,
   } as any)
+const AppWorkspaceSlugTasksProjectsRoute =
+  AppWorkspaceSlugTasksProjectsRouteImport.update({
+    id: '/projects',
+    path: '/projects',
+    getParentRoute: () => AppWorkspaceSlugTasksRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -115,11 +128,13 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AppIndexRoute
   '/api/files/$id': typeof ApiFilesIdRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
+  '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
   '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
   '/app/$workspaceSlug/tasks': typeof AppWorkspaceSlugTasksRouteWithChildren
   '/app/$workspaceSlug/': typeof AppWorkspaceSlugIndexRoute
   '/app/$workspaceSlug/tasks/$issueKey': typeof AppWorkspaceSlugTasksIssueKeyRoute
   '/app/$workspaceSlug/tasks/new': typeof AppWorkspaceSlugTasksNewRoute
+  '/app/$workspaceSlug/tasks/projects': typeof AppWorkspaceSlugTasksProjectsRoute
   '/app/$workspaceSlug/tasks/': typeof AppWorkspaceSlugTasksIndexRoute
 }
 export interface FileRoutesByTo {
@@ -132,10 +147,12 @@ export interface FileRoutesByTo {
   '/app': typeof AppIndexRoute
   '/api/files/$id': typeof ApiFilesIdRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
+  '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
   '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
   '/app/$workspaceSlug': typeof AppWorkspaceSlugIndexRoute
   '/app/$workspaceSlug/tasks/$issueKey': typeof AppWorkspaceSlugTasksIssueKeyRoute
   '/app/$workspaceSlug/tasks/new': typeof AppWorkspaceSlugTasksNewRoute
+  '/app/$workspaceSlug/tasks/projects': typeof AppWorkspaceSlugTasksProjectsRoute
   '/app/$workspaceSlug/tasks': typeof AppWorkspaceSlugTasksIndexRoute
 }
 export interface FileRoutesById {
@@ -149,11 +166,13 @@ export interface FileRoutesById {
   '/app/': typeof AppIndexRoute
   '/api/files/$id': typeof ApiFilesIdRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
+  '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
   '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
   '/app/$workspaceSlug/tasks': typeof AppWorkspaceSlugTasksRouteWithChildren
   '/app/$workspaceSlug/': typeof AppWorkspaceSlugIndexRoute
   '/app/$workspaceSlug/tasks/$issueKey': typeof AppWorkspaceSlugTasksIssueKeyRoute
   '/app/$workspaceSlug/tasks/new': typeof AppWorkspaceSlugTasksNewRoute
+  '/app/$workspaceSlug/tasks/projects': typeof AppWorkspaceSlugTasksProjectsRoute
   '/app/$workspaceSlug/tasks/': typeof AppWorkspaceSlugTasksIndexRoute
 }
 export interface FileRouteTypes {
@@ -168,11 +187,13 @@ export interface FileRouteTypes {
     | '/app/'
     | '/api/files/$id'
     | '/app/$workspaceSlug/$channelId'
+    | '/app/$workspaceSlug/inbox'
     | '/app/$workspaceSlug/office'
     | '/app/$workspaceSlug/tasks'
     | '/app/$workspaceSlug/'
     | '/app/$workspaceSlug/tasks/$issueKey'
     | '/app/$workspaceSlug/tasks/new'
+    | '/app/$workspaceSlug/tasks/projects'
     | '/app/$workspaceSlug/tasks/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -185,10 +206,12 @@ export interface FileRouteTypes {
     | '/app'
     | '/api/files/$id'
     | '/app/$workspaceSlug/$channelId'
+    | '/app/$workspaceSlug/inbox'
     | '/app/$workspaceSlug/office'
     | '/app/$workspaceSlug'
     | '/app/$workspaceSlug/tasks/$issueKey'
     | '/app/$workspaceSlug/tasks/new'
+    | '/app/$workspaceSlug/tasks/projects'
     | '/app/$workspaceSlug/tasks'
   id:
     | '__root__'
@@ -201,11 +224,13 @@ export interface FileRouteTypes {
     | '/app/'
     | '/api/files/$id'
     | '/app/$workspaceSlug/$channelId'
+    | '/app/$workspaceSlug/inbox'
     | '/app/$workspaceSlug/office'
     | '/app/$workspaceSlug/tasks'
     | '/app/$workspaceSlug/'
     | '/app/$workspaceSlug/tasks/$issueKey'
     | '/app/$workspaceSlug/tasks/new'
+    | '/app/$workspaceSlug/tasks/projects'
     | '/app/$workspaceSlug/tasks/'
   fileRoutesById: FileRoutesById
 }
@@ -219,6 +244,7 @@ export interface RootRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   ApiFilesIdRoute: typeof ApiFilesIdRoute
   AppWorkspaceSlugChannelIdRoute: typeof AppWorkspaceSlugChannelIdRoute
+  AppWorkspaceSlugInboxRoute: typeof AppWorkspaceSlugInboxRoute
   AppWorkspaceSlugOfficeRoute: typeof AppWorkspaceSlugOfficeRoute
   AppWorkspaceSlugTasksRoute: typeof AppWorkspaceSlugTasksRouteWithChildren
   AppWorkspaceSlugIndexRoute: typeof AppWorkspaceSlugIndexRoute
@@ -296,6 +322,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceSlugChannelIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/$workspaceSlug/inbox': {
+      id: '/app/$workspaceSlug/inbox'
+      path: '/app/$workspaceSlug/inbox'
+      fullPath: '/app/$workspaceSlug/inbox'
+      preLoaderRoute: typeof AppWorkspaceSlugInboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/$workspaceSlug/office': {
       id: '/app/$workspaceSlug/office'
       path: '/app/$workspaceSlug/office'
@@ -331,18 +364,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceSlugTasksNewRouteImport
       parentRoute: typeof AppWorkspaceSlugTasksRoute
     }
+    '/app/$workspaceSlug/tasks/projects': {
+      id: '/app/$workspaceSlug/tasks/projects'
+      path: '/projects'
+      fullPath: '/app/$workspaceSlug/tasks/projects'
+      preLoaderRoute: typeof AppWorkspaceSlugTasksProjectsRouteImport
+      parentRoute: typeof AppWorkspaceSlugTasksRoute
+    }
   }
 }
 
 interface AppWorkspaceSlugTasksRouteChildren {
   AppWorkspaceSlugTasksIssueKeyRoute: typeof AppWorkspaceSlugTasksIssueKeyRoute
   AppWorkspaceSlugTasksNewRoute: typeof AppWorkspaceSlugTasksNewRoute
+  AppWorkspaceSlugTasksProjectsRoute: typeof AppWorkspaceSlugTasksProjectsRoute
   AppWorkspaceSlugTasksIndexRoute: typeof AppWorkspaceSlugTasksIndexRoute
 }
 
 const AppWorkspaceSlugTasksRouteChildren: AppWorkspaceSlugTasksRouteChildren = {
   AppWorkspaceSlugTasksIssueKeyRoute: AppWorkspaceSlugTasksIssueKeyRoute,
   AppWorkspaceSlugTasksNewRoute: AppWorkspaceSlugTasksNewRoute,
+  AppWorkspaceSlugTasksProjectsRoute: AppWorkspaceSlugTasksProjectsRoute,
   AppWorkspaceSlugTasksIndexRoute: AppWorkspaceSlugTasksIndexRoute,
 }
 
@@ -361,6 +403,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   ApiFilesIdRoute: ApiFilesIdRoute,
   AppWorkspaceSlugChannelIdRoute: AppWorkspaceSlugChannelIdRoute,
+  AppWorkspaceSlugInboxRoute: AppWorkspaceSlugInboxRoute,
   AppWorkspaceSlugOfficeRoute: AppWorkspaceSlugOfficeRoute,
   AppWorkspaceSlugTasksRoute: AppWorkspaceSlugTasksRouteWithChildren,
   AppWorkspaceSlugIndexRoute: AppWorkspaceSlugIndexRoute,

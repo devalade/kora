@@ -1,5 +1,6 @@
 import { Bold, Code2, Italic, Link2, ListTodo, Loader2 } from 'lucide-react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import { TaskList } from '@tiptap/extension-task-list';
 import { TaskItem } from '@tiptap/extension-task-item';
@@ -15,12 +16,17 @@ export function MarkdownEditor({
   onBlur,
   placeholder = 'Write in Markdown...',
   ariaLabel = 'Description',
+  variant = 'boxed',
+  minHeight = 160,
 }: {
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
   placeholder?: string;
   ariaLabel?: string;
+  /** 'bare' reads as plain text, like Linear: no frame, formatting in a menu over the selection. */
+  variant?: 'boxed' | 'bare';
+  minHeight?: number;
 }) {
   const onChangeRef = useRef(onChange);
   const lastSyncedValue = useRef(value);
@@ -71,18 +77,8 @@ export function MarkdownEditor({
     command();
   }
 
-  return (
-    <div
-      className={cn(
-        'markdown-editor overflow-hidden rounded-xl border border-line bg-paper transition-[border-color,box-shadow] duration-150 ease-out',
-        'focus-within:border-ink/25 focus-within:shadow-[0_0_0_3px_rgba(23,26,26,0.05)]',
-      )}
-    >
-      <div className="flex h-10 items-center gap-1 border-b border-line-soft px-2">
-        <span className="px-1 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
-          Markdown
-        </span>
-        <div className="ml-2 flex items-center gap-0.5">
+  const tools = (
+    <>
           <ToolButton
             label="Bold"
             active={editor?.isActive('bold')}
@@ -132,7 +128,43 @@ export function MarkdownEditor({
           >
             <Link2 size={14} />
           </ToolButton>
-        </div>
+    </>
+  );
+
+  if (variant === 'bare') {
+    return (
+      <div className="markdown-editor markdown-editor-bare">
+        {editor ? (
+          <>
+            <BubbleMenu
+              editor={editor}
+              className="flex items-center gap-0.5 rounded-lg border border-line/80 bg-paper p-1 shadow-[var(--kora-shadow-popover)]"
+            >
+              {tools}
+            </BubbleMenu>
+            <EditorContent editor={editor} style={{ minHeight }} />
+          </>
+        ) : (
+          <div className="whitespace-pre-wrap text-[15px] leading-6 text-faint" style={{ minHeight }}>
+            {value || placeholder}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        'markdown-editor overflow-hidden rounded-xl border border-line bg-paper transition-[border-color,box-shadow] duration-150 ease-out',
+        'focus-within:border-ink/25 focus-within:shadow-[0_0_0_3px_rgba(23,26,26,0.05)]',
+      )}
+    >
+      <div className="flex h-10 items-center gap-1 border-b border-line-soft px-2">
+        <span className="px-1 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase">
+          Markdown
+        </span>
+        <div className="ml-2 flex items-center gap-0.5">{tools}</div>
         <div className="ml-auto flex items-center gap-2">
           {progress.total > 0 && (
             <span

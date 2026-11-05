@@ -1,5 +1,5 @@
 import { Check, ChevronDown } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../utils/cn';
 
 export type PropertyOption = {
@@ -9,12 +9,49 @@ export type PropertyOption = {
   description?: string;
 };
 
+export type PropertyVariant = 'field' | 'row' | 'chip';
+
+// Trigger styles. 'row' is the borderless line in the issue side panel; 'chip' is the small
+// bordered pill under the title in the create modal; 'field' is a full form control.
+export const propertyTrigger: Record<PropertyVariant, string> = {
+  field:
+    'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-left text-[13px] font-medium text-ink-soft transition-[border-color,box-shadow,background-color] duration-150 ease-out hover:border-ink/20 disabled:opacity-50',
+  row: 'flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium text-ink-soft transition-colors duration-100 hover:bg-ink/[0.045] disabled:opacity-50',
+  chip: 'inline-flex h-7 max-w-[200px] min-w-0 items-center gap-1.5 rounded-md border border-line bg-paper px-2 text-left text-[12px] font-medium text-ink-soft transition-[border-color,background-color] duration-100 hover:border-ink/20 hover:bg-canvas disabled:opacity-50',
+};
+
+const triggerOpen: Record<PropertyVariant, string> = {
+  field: 'border-ink/25 bg-paper shadow-[0_0_0_3px_rgba(23,26,26,0.05)]',
+  row: 'bg-ink/[0.045]',
+  chip: 'border-ink/25 bg-canvas',
+};
+
+/** Opens the menu above the trigger when there is not enough room below it. */
+export function useMenuPlacement(open: boolean, anchor: React.RefObject<HTMLElement | null>) {
+  const [up, setUp] = useState(false);
+  useLayoutEffect(() => {
+    if (!open || !anchor.current) return;
+    const rect = anchor.current.getBoundingClientRect();
+    setUp(window.innerHeight - rect.bottom < 320 && rect.top > window.innerHeight - rect.bottom);
+  }, [open, anchor]);
+  return up;
+}
+
+export const menuSurface =
+  'absolute z-50 w-max min-w-[220px] max-w-[300px] overflow-hidden rounded-lg border border-line/80 bg-paper shadow-[var(--kora-shadow-popover)]';
+
 export function PropertySelect({
   value,
   options,
   onChange,
   ariaLabel,
   placeholder = 'Select',
+  searchPlaceholder,
+  variant = 'field',
+  hideLabel,
+  numbered,
+  unsetValue,
+  emptyIcon,
   className,
   menuClassName,
   disabled,
@@ -24,16 +61,39 @@ export function PropertySelect({
   onChange: (value: string) => void;
   ariaLabel: string;
   placeholder?: string;
+  /** Shows a filter input at the top of the menu, like Linear's "Change status…". */
+  searchPlaceholder?: string;
+  variant?: PropertyVariant;
+  /** Show only the icon in the trigger (chips that speak through their icon, like priority). */
+  hideLabel?: boolean;
+  /** Number keys 1–9 pick an option while the filter is empty. */
+  numbered?: boolean;
+  /** When value equals this, the trigger shows the placeholder (Linear: "Priority", not "No priority"). */
+  unsetValue?: string;
+  /** Icon for the trigger while it shows the placeholder. */
+  emptyIcon?: ReactNode;
   className?: string;
   menuClassName?: string;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const [keyboardOpened, setKeyboardOpened] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const selected = options.find((option) => option.value === value);
+  const up = useMenuPlacement(open, triggerRef);
+  const unset = unsetValue !== undefined && value === unsetValue;
+  const selected = unset ? undefined : options.find((option) => option.value === value);
+  const triggerIcon = selected?.icon ?? (unset ? options.find((o) => o.value === value)?.icon ?? emptyIcon : emptyIcon);
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(needle));
+  }, [options, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -47,115 +107,167 @@ export function PropertySelect({
 
   useEffect(() => {
     if (!open) return;
+    setQuery('');
     const index = options.findIndex((option) => option.value === value);
     setActive(index >= 0 ? index : 0);
-  }, [open, options, value]);
+    requestAnimationFrame(() => (searchPlaceholder ? searchRef.current : listRef.current)?.focus());
+    // Only when the menu opens; options change on every poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  function openMenu(fromKeyboard = false) {
-    setKeyboardOpened(fromKeyboard);
-    setOpen(true);
+  useEffect(() => {
+    setActive((current) => Math.min(current, Math.max(0, visible.length - 1)));
+  }, [visible.length]);
+
+  function close(refocus = true) {
+    setOpen(false);
+    if (refocus) triggerRef.current?.focus();
   }
 
-  function choose(index: number) {
-    const option = options[index];
+  function choose(option: PropertyOption | undefined) {
     if (!option) return;
     onChange(option.value);
-    setOpen(false);
+    close();
+  }
+
+  function onMenuKey(event: React.KeyboardEvent) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActive((current) =>
+        event.key === 'ArrowDown'
+          ? Math.min(visible.length - 1, current + 1)
+          : Math.max(0, current - 1),
+      );
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      choose(visible[active]);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    } else if (event.key === 'Tab') {
+      close(false);
+    } else if (numbered && !query && /^[1-9]$/.test(event.key)) {
+      event.preventDefault();
+      choose(options[Number(event.key) - 1]);
+    }
   }
 
   return (
-    <div ref={rootRef} data-audit-skip="C5" className={cn('relative min-w-0', className)}>
+    // A1: an assignee row starts with an avatar, whose centred initials the audit reads as the
+    // row's text edge. The trigger boxes themselves share one left edge.
+    <div ref={rootRef} data-audit-skip="C5 A1" className={cn('relative min-w-0', className)}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         aria-label={ariaLabel}
-        role="combobox"
+        title={hideLabel ? `${ariaLabel}: ${selected?.label ?? placeholder}` : undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        aria-activedescendant={open ? `${listId}-${active}` : undefined}
-        onClick={() => {
-          if (open) setOpen(false);
-          else openMenu(false);
-        }}
+        onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
-            if (!open) {
-              openMenu(true);
-              return;
-            }
-            setActive((current) =>
-              event.key === 'ArrowDown'
-                ? Math.min(options.length - 1, current + 1)
-                : Math.max(0, current - 1),
-            );
-          } else if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            if (open) choose(active);
-            else openMenu(true);
-          } else if (event.key === 'Escape' && open) {
-            event.preventDefault();
-            setOpen(false);
+            setOpen(true);
           }
         }}
-        className={cn(
-          'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-left text-[13px] font-medium text-ink-soft transition-[border-color,box-shadow,background-color] duration-150 ease-out hover:border-ink/20 disabled:opacity-50',
-          open && 'border-ink/25 bg-paper shadow-[0_0_0_3px_rgba(23,26,26,0.05)]',
-        )}
+        className={cn(propertyTrigger[variant], open && triggerOpen[variant])}
       >
-        <span className="grid size-5 shrink-0 place-items-center">{selected?.icon}</span>
-        <span className={cn('min-w-0 flex-1 truncate', !selected && 'text-faint')}>
-          {selected?.label ?? placeholder}
-        </span>
-        <ChevronDown
-          size={14}
-          className={cn(
-            'shrink-0 text-faint transition-transform duration-150 ease-out',
-            open && 'rotate-180',
-          )}
-        />
+        {(triggerIcon || variant !== 'chip') && (
+          <span
+            className={cn('grid shrink-0 place-items-center', variant === 'chip' ? 'size-4' : 'size-5')}
+          >
+            {triggerIcon}
+          </span>
+        )}
+        {!hideLabel && (
+          <span className={cn('min-w-0 flex-1 truncate', !selected && 'text-muted')}>
+            {selected?.label ?? placeholder}
+          </span>
+        )}
+        {variant === 'field' && (
+          <ChevronDown
+            size={14}
+            className={cn(
+              'shrink-0 text-faint transition-transform duration-150 ease-out',
+              open && 'rotate-180',
+            )}
+          />
+        )}
       </button>
 
       {open && (
         <div
-          id={listId}
-          role="listbox"
-          aria-label={ariaLabel}
           className={cn(
-            'absolute z-50 mt-1.5 max-h-[280px] w-full min-w-[210px] overflow-y-auto rounded-xl border border-line/80 bg-paper p-1 shadow-[var(--kora-shadow-popover)]',
-            !keyboardOpened && 'popover-in',
+            menuSurface,
+            up ? 'bottom-full mb-1' : 'top-full mt-1',
+            variant === 'field' && 'w-full',
+            'popover-in',
             menuClassName,
           )}
         >
-          {options.map((option, index) => {
-            const isSelected = option.value === value;
-            return (
-              <div
-                key={option.value}
-                id={`${listId}-${index}`}
-                role="option"
-                aria-selected={isSelected}
-                tabIndex={-1}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  choose(index);
-                }}
-                onPointerEnter={() => setActive(index)}
-                className={cn(
-                  'flex h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-[13px] transition-colors duration-100',
-                  index === active ? 'bg-canvas text-ink' : 'text-ink-soft',
-                )}
-              >
-                <span className="grid size-5 shrink-0 place-items-center">{option.icon}</span>
-                <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                {option.description && (
-                  <span className="hidden text-[11px] text-faint sm:block">{option.description}</span>
-                )}
-                {isSelected && <Check size={14} className="shrink-0 text-coral" />}
-              </div>
-            );
-          })}
+          {searchPlaceholder && (
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={onMenuKey}
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+              aria-controls={listId}
+              aria-activedescendant={visible[active] ? `${listId}-${active}` : undefined}
+              className="h-9 w-full border-b border-line-soft bg-transparent px-3 text-[16px] outline-none placeholder:text-faint sm:text-[13px]"
+            />
+          )}
+          <div
+            ref={listRef}
+            id={listId}
+            role="listbox"
+            aria-label={ariaLabel}
+            tabIndex={searchPlaceholder ? -1 : 0}
+            onKeyDown={searchPlaceholder ? undefined : onMenuKey}
+            aria-activedescendant={visible[active] ? `${listId}-${active}` : undefined}
+            className="max-h-[280px] overflow-y-auto p-1 outline-none"
+          >
+            {visible.length === 0 && (
+              <p className="px-2 py-2 text-[13px] text-muted">No matches</p>
+            )}
+            {visible.map((option, index) => {
+              const isSelected = option.value === value;
+              const shortcut = numbered && !query ? options.indexOf(option) + 1 : 0;
+              return (
+                <div
+                  key={option.value}
+                  id={`${listId}-${index}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    choose(option);
+                  }}
+                  onPointerEnter={() => setActive(index)}
+                  className={cn(
+                    'flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-[13px]',
+                    index === active ? 'bg-ink/[0.05] text-ink' : 'text-ink-soft',
+                  )}
+                >
+                  <span className="grid size-5 shrink-0 place-items-center">{option.icon}</span>
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  {option.description && (
+                    <span className="hidden text-[12px] text-faint sm:block">{option.description}</span>
+                  )}
+                  {isSelected && <Check size={14} className="shrink-0 text-ink-soft" />}
+                  {shortcut > 0 && shortcut < 10 && (
+                    <span className="w-3 shrink-0 text-right text-[12px] tabular-nums text-faint">
+                      {shortcut}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

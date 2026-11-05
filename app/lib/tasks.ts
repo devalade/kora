@@ -3,19 +3,22 @@ import { and, asc, db, desc, eq, gt, inArray, sql } from 'void/db';
 import {
   issueComments,
   issueEditors,
+  issueEvents,
   issueLabels,
   issues,
   labels,
   projects,
+  teams,
   taskStatuses,
   users,
   workspaceMembers,
   workspaces,
 } from '@schema';
 import { z } from 'zod';
+import { issueSubscribers, notify, recordIssueEvent } from './activity';
 import { newId } from './ids';
 import { toUserSummary } from './people';
-import { memberUsers, requireWorkspace, touchPresence } from './server';
+import { inChunks, memberUsers, requireWorkspace, touchPresence } from './server';
 import { readSessionUser } from './session';
 import {
   DEFAULT_TASK_STATUSES,
@@ -23,20 +26,28 @@ import {
   TASK_STATUS_CATEGORIES,
 } from './task-config';
 import type {
+  IssueEventKind,
   TaskComment,
+  TaskEvent,
   TaskIssue,
+  TaskProject,
+  TaskProjectStatus,
   TaskIssueDetail,
   TaskLabel,
   TaskPriority,
-  TaskProject,
+  TaskTeam,
   TaskStatus,
   TaskStatusCategory,
   TasksSnapshot,
 } from './types';
 
 const PRIORITIES = [0, 1, 2, 3, 4] as const;
+const PRIORITY_NAMES = ['No priority', 'Urgent', 'High', 'Medium', 'Low'];
+const PROJECT_STATUSES = ['backlog', 'planned', 'started', 'paused', 'completed', 'canceled'] as const;
+const COMMENT_TYPING_WINDOW_MS = 5_000;
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a six digit hex color.');
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-11-04.');
+const idListSchema = z.array(z.string().max(64)).max(50);
 
 function colorForLabel(name: string) {
   let hash = 0;
@@ -58,9 +69,12 @@ const issueSelection = {
   startDate: issues.startDate,
   dueDate: issues.dueDate,
   parentId: issues.parentIssueId,
+  teamId: issues.teamId,
+  teamName: teams.name,
+  teamKey: teams.key,
+  teamColor: teams.color,
   projectId: issues.projectId,
   projectName: projects.name,
-  projectKey: projects.key,
   projectColor: projects.color,
   assigneeId: issues.assigneeId,
   assigneeName: users.name,
@@ -88,10 +102,13 @@ type IssueRow = {
   startDate: string | null;
   dueDate: string | null;
   parentId: string | null;
-  projectId: string;
-  projectName: string;
-  projectKey: string;
-  projectColor: string;
+  teamId: string;
+  teamName: string;
+  teamKey: string;
+  teamColor: string;
+  projectId: string | null;
+  projectName: string | null;
+  projectColor: string | null;
   assigneeId: string | null;
   assigneeName: string | null;
   assigneeEmail: string | null;
@@ -103,6 +120,12 @@ type IssueRow = {
   createdAt: string;
   updatedAt: string;
 };
+
+function toProjectStatus(value: string): TaskProjectStatus {
+  return PROJECT_STATUSES.includes(value as TaskProjectStatus)
+    ? (value as TaskProjectStatus)
+    : 'planned';
+}
 
 function statusCategory(value: string): TaskStatusCategory {
   return TASK_STATUS_CATEGORIES.includes(value as TaskStatusCategory)
@@ -137,8 +160,10 @@ async function ensureTaskStatuses(workspaceId: string) {
   await db
     .insert(taskStatuses)
     .values(
+      // Status ids are global primary keys, so every workspace gets its own.
       DEFAULT_TASK_STATUSES.map((status) => ({
         ...status,
+        id: newId(),
         workspaceId,
       })),
     )
@@ -152,6 +177,33 @@ async function ensureTaskStatuses(workspaceId: string) {
   return created.map(toStatus);
 }
 
+const TEAM_KEY = /^[A-Z][A-Z0-9]{1,4}$/;
+
+function teamKeyFrom(name: string) {
+  const letters = name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const key = letters.replace(/^[0-9]+/, '').slice(0, 3);
+  return key.length >= 2 ? key : 'TSK';
+}
+
+// Workspaces created before teams existed have none, and issues need one for their key.
+async function createDefaultTeam(workspaceId: string, workspaceName: string, userId: string) {
+  await db
+    .insert(teams)
+    .values({
+      id: newId(),
+      workspaceId,
+      name: workspaceName,
+      key: teamKeyFrom(workspaceName),
+      createdBy: userId,
+    })
+    .onConflictDoNothing();
+  return db
+    .select()
+    .from(teams)
+    .where(eq(teams.workspaceId, workspaceId))
+    .orderBy(asc(teams.createdAt));
+}
+
 async function workspaceForSlug(slug: string, userId: string) {
   const [workspace] = await db.select().from(workspaces).where(eq(workspaces.slug, slug));
   if (!workspace) throw new Error('Workspace not found.');
@@ -163,7 +215,7 @@ async function workspaceForSlug(slug: string, userId: string) {
 function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: number): TaskIssue {
   return {
     id: row.id,
-    key: `${row.projectKey}-${row.number}`,
+    key: `${row.teamKey}-${row.number}`,
     number: row.number,
     title: row.title,
     description: row.description,
@@ -180,12 +232,16 @@ function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: numb
     parentId: row.parentId,
     subIssueCount: 0,
     subIssueDone: 0,
-    project: {
-      id: row.projectId,
-      name: row.projectName,
-      key: row.projectKey,
-      color: row.projectColor,
+    team: {
+      id: row.teamId,
+      name: row.teamName,
+      key: row.teamKey,
+      color: row.teamColor,
     },
+    project:
+      row.projectId && row.projectName
+        ? { id: row.projectId, name: row.projectName, color: row.projectColor ?? '#5B8DEF' }
+        : null,
     assignee:
       row.assigneeId && row.assigneeName && row.assigneeEmail && row.assigneeAvatarColor
         ? toUserSummary({
@@ -208,16 +264,18 @@ function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: numb
 
 async function issueLabelsFor(issueIds: string[]) {
   if (issueIds.length === 0) return new Map<string, TaskLabel[]>();
-  const rows = await db
-    .select({
-      issueId: issueLabels.issueId,
-      id: labels.id,
-      name: labels.name,
-      color: labels.color,
-    })
-    .from(issueLabels)
-    .innerJoin(labels, eq(labels.id, issueLabels.labelId))
-    .where(inArray(issueLabels.issueId, issueIds));
+  const rows = await inChunks(issueIds, (chunk) =>
+    db
+      .select({
+        issueId: issueLabels.issueId,
+        id: labels.id,
+        name: labels.name,
+        color: labels.color,
+      })
+      .from(issueLabels)
+      .innerJoin(labels, eq(labels.id, issueLabels.labelId))
+      .where(inArray(issueLabels.issueId, chunk)),
+  );
   const map = new Map<string, TaskLabel[]>();
   for (const row of rows) {
     const list = map.get(row.issueId) ?? [];
@@ -229,11 +287,13 @@ async function issueLabelsFor(issueIds: string[]) {
 
 async function commentCountsFor(issueIds: string[]) {
   if (issueIds.length === 0) return new Map<string, number>();
-  const rows = await db
-    .select({ issueId: issueComments.issueId, count: sql<number>`count(*)` })
-    .from(issueComments)
-    .where(inArray(issueComments.issueId, issueIds))
-    .groupBy(issueComments.issueId);
+  const rows = await inChunks(issueIds, (chunk) =>
+    db
+      .select({ issueId: issueComments.issueId, count: sql<number>`count(*)` })
+      .from(issueComments)
+      .where(inArray(issueComments.issueId, chunk))
+      .groupBy(issueComments.issueId),
+  );
   return new Map(rows.map((row) => [row.issueId, Number(row.count)]));
 }
 
@@ -242,7 +302,7 @@ async function requireIssue(issueId: string, userId: string) {
     .select({
       id: issues.id,
       workspaceId: issues.workspaceId,
-      projectId: issues.projectId,
+      teamId: issues.teamId,
       startDate: issues.startDate,
       dueDate: issues.dueDate,
     })
@@ -256,29 +316,82 @@ async function requireIssue(issueId: string, userId: string) {
 function parseIssueKey(key: string) {
   const separator = key.lastIndexOf('-');
   if (separator < 1) throw new Error('Issue not found.');
-  const projectKey = key.slice(0, separator);
+  const teamKey = key.slice(0, separator);
   const number = Number(key.slice(separator + 1));
   if (!Number.isInteger(number) || number < 1) throw new Error('Issue not found.');
-  return { projectKey, number };
+  return { teamKey, number };
 }
 
-async function issueRowByKey(workspaceId: string, issueKey: string) {
-  const { projectKey, number } = parseIssueKey(issueKey);
-  const [project] = await db
-    .select({ id: projects.id })
-    .from(projects)
-    .where(and(eq(projects.workspaceId, workspaceId), eq(projects.key, projectKey)));
-  if (!project) throw new Error('Issue not found.');
+async function issueRowById(issueId: string) {
   const [row] = await db
     .select(issueSelection)
     .from(issues)
-    .innerJoin(projects, eq(projects.id, issues.projectId))
+    .innerJoin(teams, eq(teams.id, issues.teamId))
+    .leftJoin(projects, eq(projects.id, issues.projectId))
+    .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+    .leftJoin(users, eq(users.id, issues.assigneeId))
+    .where(eq(issues.id, issueId));
+  return row ?? null;
+}
+
+async function issueKeyById(issueId: string | null) {
+  if (!issueId) return null;
+  const [row] = await db
+    .select({ key: teams.key, number: issues.number })
+    .from(issues)
+    .innerJoin(teams, eq(teams.id, issues.teamId))
+    .where(eq(issues.id, issueId));
+  return row ? `${row.key}-${row.number}` : null;
+}
+
+/** Writes one history line per field that changed between two reads of the same issue. */
+async function recordChanges(
+  before: IssueRow,
+  after: IssueRow,
+  actorId: string,
+  labelChange?: { added: string[]; removed: string[] },
+) {
+  const lines: [IssueEventKind, string | null, string | null][] = [];
+  if (before.title !== after.title) lines.push(['title', before.title, after.title]);
+  if (before.statusId !== after.statusId) lines.push(['status', before.statusName, after.statusName]);
+  if (before.priority !== after.priority) {
+    lines.push(['priority', PRIORITY_NAMES[before.priority] ?? null, PRIORITY_NAMES[after.priority] ?? null]);
+  }
+  if (before.assigneeId !== after.assigneeId) {
+    lines.push(['assignee', before.assigneeName, after.assigneeName]);
+  }
+  if (before.projectId !== after.projectId) {
+    lines.push(['project', before.projectName, after.projectName]);
+  }
+  if (before.parentId !== after.parentId) {
+    lines.push(['parent', await issueKeyById(before.parentId), await issueKeyById(after.parentId)]);
+  }
+  if (before.startDate !== after.startDate) lines.push(['start_date', before.startDate, after.startDate]);
+  if (before.dueDate !== after.dueDate) lines.push(['due_date', before.dueDate, after.dueDate]);
+  if (labelChange && (labelChange.added.length > 0 || labelChange.removed.length > 0)) {
+    lines.push(['labels', labelChange.removed.join(', ') || null, labelChange.added.join(', ') || null]);
+  }
+  for (const [kind, from, to] of lines) await recordIssueEvent(after.id, actorId, kind, from, to);
+}
+
+async function issueRowByKey(workspaceId: string, issueKey: string) {
+  const { teamKey, number } = parseIssueKey(issueKey);
+  const [team] = await db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(and(eq(teams.workspaceId, workspaceId), eq(teams.key, teamKey)));
+  if (!team) throw new Error('Issue not found.');
+  const [row] = await db
+    .select(issueSelection)
+    .from(issues)
+    .innerJoin(teams, eq(teams.id, issues.teamId))
+    .leftJoin(projects, eq(projects.id, issues.projectId))
     .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
     .leftJoin(users, eq(users.id, issues.assigneeId))
     .where(
       and(
         eq(issues.workspaceId, workspaceId),
-        eq(issues.projectId, project.id),
+        eq(issues.teamId, team.id),
         eq(issues.number, number),
       ),
     );
@@ -316,8 +429,101 @@ function toComment(row: {
   };
 }
 
+type EventRow = {
+  id: string;
+  kind: string;
+  fromValue: string | null;
+  toValue: string | null;
+  createdAt: string;
+  actorId: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  actorAvatarColor: string | null;
+  actorTitle: string | null;
+  actorStatusEmoji: string | null;
+  actorStatusText: string | null;
+  actorLastSeenAt: string | null;
+};
+
+function toEvent(row: EventRow): TaskEvent {
+  let to = row.toValue;
+  if (row.kind === 'mentioned' && to) {
+    // Stored as JSON so the chat side can add fields; the history line only needs the channel.
+    try {
+      const parsed = JSON.parse(to) as { channelName?: string };
+      to = parsed.channelName ? `#${parsed.channelName}` : null;
+    } catch {
+      to = null;
+    }
+  }
+  return {
+    id: row.id,
+    kind: row.kind as IssueEventKind,
+    actor:
+      row.actorId && row.actorName && row.actorEmail && row.actorAvatarColor
+        ? toUserSummary({
+            id: row.actorId,
+            name: row.actorName,
+            email: row.actorEmail,
+            avatarColor: row.actorAvatarColor,
+            title: row.actorTitle ?? '',
+            statusEmoji: row.actorStatusEmoji ?? '',
+            statusText: row.actorStatusText ?? '',
+            lastSeenAt: row.actorLastSeenAt ?? new Date().toISOString(),
+          })
+        : null,
+    from: row.fromValue,
+    to,
+    createdAt: row.createdAt,
+  };
+}
+
 async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
-  const [labelMap, commentMap, commentRows, childRows, parentRow, editorRows] = await Promise.all([
+  const creatorRows = db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      avatarColor: users.avatarColor,
+      title: users.title,
+      statusEmoji: users.statusEmoji,
+      statusText: users.statusText,
+      lastSeenAt: users.lastSeenAt,
+    })
+    .from(issues)
+    .innerJoin(users, eq(users.id, issues.createdBy))
+    .where(eq(issues.id, row.id));
+  const eventRows = db
+    .select({
+      id: issueEvents.id,
+      kind: issueEvents.kind,
+      fromValue: issueEvents.fromValue,
+      toValue: issueEvents.toValue,
+      createdAt: issueEvents.createdAt,
+      actorId: users.id,
+      actorName: users.name,
+      actorEmail: users.email,
+      actorAvatarColor: users.avatarColor,
+      actorTitle: users.title,
+      actorStatusEmoji: users.statusEmoji,
+      actorStatusText: users.statusText,
+      actorLastSeenAt: users.lastSeenAt,
+    })
+    .from(issueEvents)
+    .leftJoin(users, eq(users.id, issueEvents.actorId))
+    .where(eq(issueEvents.issueId, row.id))
+    .orderBy(asc(issueEvents.createdAt))
+    .limit(200);
+  const [
+    labelMap,
+    commentMap,
+    commentRows,
+    childRows,
+    parentRow,
+    editorRows,
+    creatorRow,
+    historyRows,
+  ] = await Promise.all([
     issueLabelsFor([row.id]),
     commentCountsFor([row.id]),
     db
@@ -341,7 +547,8 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
     db
       .select(issueSelection)
       .from(issues)
-      .innerJoin(projects, eq(projects.id, issues.projectId))
+      .innerJoin(teams, eq(teams.id, issues.teamId))
+      .leftJoin(projects, eq(projects.id, issues.projectId))
       .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
       .leftJoin(users, eq(users.id, issues.assigneeId))
       .where(eq(issues.parentIssueId, row.id))
@@ -350,7 +557,8 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       ? db
           .select(issueSelection)
           .from(issues)
-          .innerJoin(projects, eq(projects.id, issues.projectId))
+          .innerJoin(teams, eq(teams.id, issues.teamId))
+      .leftJoin(projects, eq(projects.id, issues.projectId))
           .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
           .leftJoin(users, eq(users.id, issues.assigneeId))
           .where(eq(issues.id, row.parentId))
@@ -365,6 +573,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
         statusEmoji: users.statusEmoji,
         statusText: users.statusText,
         lastSeenAt: users.lastSeenAt,
+        typingAt: issueEditors.typingAt,
       })
       .from(issueEditors)
       .innerJoin(users, eq(users.id, issueEditors.userId))
@@ -374,8 +583,11 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
           gt(issueEditors.updatedAt, new Date(Date.now() - 15_000).toISOString()),
         ),
       ),
+    creatorRows,
+    eventRows,
   ]);
 
+  const typingSince = new Date(Date.now() - COMMENT_TYPING_WINDOW_MS).toISOString();
   const subIssues = childRows.map((child) =>
     toIssue(child, [], 0),
   );
@@ -391,6 +603,11 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
     parent,
     subIssues,
     editors: editorRows.map((editor) => toUserSummary(editor)),
+    createdBy: creatorRow[0] ? toUserSummary(creatorRow[0]) : null,
+    events: historyRows.map(toEvent),
+    commentTyping: editorRows
+      .filter((editor) => editor.typingAt && editor.typingAt > typingSince)
+      .map((editor) => toUserSummary(editor)),
   };
 }
 
@@ -402,24 +619,35 @@ export const getTasksFn = createServerFn({ method: 'GET' })
     const { workspace, membership, statuses } = await workspaceForSlug(data.slug, me.id);
     await touchPresence(me.id);
 
-    const [projectRows, labelRows, members, issueRows] = await Promise.all([
+    const [existingTeams, labelRows, members, issueRows, projectRows] = await Promise.all([
       db
         .select()
-        .from(projects)
-        .where(eq(projects.workspaceId, workspace.id))
-        .orderBy(asc(projects.createdAt)),
+        .from(teams)
+        .where(eq(teams.workspaceId, workspace.id))
+        .orderBy(asc(teams.createdAt)),
       db.select().from(labels).where(eq(labels.workspaceId, workspace.id)).orderBy(asc(labels.name)),
       memberUsers(workspace.id),
       db
         .select(issueSelection)
         .from(issues)
-        .innerJoin(projects, eq(projects.id, issues.projectId))
+        .innerJoin(teams, eq(teams.id, issues.teamId))
+      .leftJoin(projects, eq(projects.id, issues.projectId))
         .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
         .leftJoin(users, eq(users.id, issues.assigneeId))
         .where(eq(issues.workspaceId, workspace.id))
         .orderBy(desc(issues.updatedAt))
         .limit(500),
+      db
+        .select()
+        .from(projects)
+        .where(eq(projects.workspaceId, workspace.id))
+        .orderBy(asc(projects.createdAt)),
     ]);
+
+    const teamRows =
+      existingTeams.length > 0
+        ? existingTeams
+        : await createDefaultTeam(workspace.id, workspace.name, me.id);
 
     const ids = issueRows.map((row) => row.id);
     const [labelMap, commentMap] = await Promise.all([
@@ -443,17 +671,17 @@ export const getTasksFn = createServerFn({ method: 'GET' })
       subIssueCount: subIssueCounts.get(issue.id)?.total ?? 0,
       subIssueDone: subIssueCounts.get(issue.id)?.done ?? 0,
     }));
-    const projectCounts = new Map<string, number>();
+    const teamCounts = new Map<string, number>();
     for (const issue of issuesWithSubIssues) {
-      projectCounts.set(issue.project.id, (projectCounts.get(issue.project.id) ?? 0) + 1);
+      teamCounts.set(issue.team.id, (teamCounts.get(issue.team.id) ?? 0) + 1);
     }
-    const projectsView: TaskProject[] = projectRows.map((project) => ({
-      id: project.id,
-      name: project.name,
-      key: project.key,
-      color: project.color,
-      description: project.description,
-      issueCount: projectCounts.get(project.id) ?? 0,
+    const teamsView: TaskTeam[] = teamRows.map((team) => ({
+      id: team.id,
+      name: team.name,
+      key: team.key,
+      color: team.color,
+      description: team.description,
+      issueCount: teamCounts.get(team.id) ?? 0,
     }));
 
     const byStatus: Record<string, number> = Object.fromEntries(
@@ -472,7 +700,23 @@ export const getTasksFn = createServerFn({ method: 'GET' })
         role: membership.role,
       },
       me,
-      projects: projectsView,
+      teams: teamsView,
+      projects: projectRows.map((project): TaskProject => {
+        const projectIssues = issuesWithSubIssues.filter((issue) => issue.project?.id === project.id);
+        const lead = project.leadId ? members.find((member) => member.id === project.leadId) : null;
+        return {
+          id: project.id,
+          name: project.name,
+          description: project.description,
+          color: project.color,
+          status: toProjectStatus(project.status),
+          lead: lead ?? null,
+          startDate: project.startDate,
+          targetDate: project.targetDate,
+          issueCount: projectIssues.length,
+          doneCount: projectIssues.filter((issue) => issue.status.category === 'completed').length,
+        };
+      }),
       labels: labelRows.map((label) => ({ id: label.id, name: label.name, color: label.color })),
       statuses,
       members,
@@ -502,6 +746,24 @@ export const touchIssueEditorFn = createServerFn({ method: 'POST' })
     return { ok: true as const };
   });
 
+export const setIssueTypingFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ issueId: z.string(), active: z.boolean() }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    await requireIssue(data.issueId, me.id);
+    const now = new Date().toISOString();
+    const typingAt = data.active ? now : null;
+    await db
+      .insert(issueEditors)
+      .values({ issueId: data.issueId, userId: me.id, updatedAt: now, typingAt })
+      .onConflictDoUpdate({
+        target: [issueEditors.issueId, issueEditors.userId],
+        set: { updatedAt: now, typingAt },
+      });
+    return { ok: true as const };
+  });
+
 export const getIssueFn = createServerFn({ method: 'GET' })
   .validator(z.object({ slug: z.string(), issueKey: z.string() }))
   .handler(async ({ data }) => {
@@ -516,13 +778,14 @@ export const createIssueFn = createServerFn({ method: 'POST' })
   .validator(
     z.object({
       slug: z.string(),
-      projectId: z.string(),
+      teamId: z.string(),
+      projectId: z.string().max(64).nullable().optional(),
       title: z.string().trim().min(1, 'Give the issue a title').max(200),
       description: z.string().max(8000).default(''),
       statusId: z.string().optional(),
       priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(0),
       assigneeId: z.string().nullable().optional(),
-      labelIds: z.array(z.string()).default([]),
+      labelIds: idListSchema.default([]),
       parentIssueId: z.string().nullable().optional(),
       startDate: dateSchema.nullable().optional(),
       dueDate: dateSchema.nullable().optional(),
@@ -532,23 +795,23 @@ export const createIssueFn = createServerFn({ method: 'POST' })
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
-    let projectId = data.projectId;
+    let teamId = data.teamId;
     if (data.parentIssueId) {
       const [parent] = await db
-        .select({ id: issues.id, workspaceId: issues.workspaceId, projectId: issues.projectId })
+        .select({ id: issues.id, workspaceId: issues.workspaceId, teamId: issues.teamId })
         .from(issues)
         .where(eq(issues.id, data.parentIssueId));
       if (!parent || parent.workspaceId !== workspace.id) throw new Error('Parent issue not found.');
-      projectId = parent.projectId;
+      teamId = parent.teamId;
     }
     if (data.startDate && data.dueDate && data.dueDate < data.startDate) {
       throw new Error('The due date cannot be before the start date.');
     }
-    const [project] = await db
+    const [team] = await db
       .select()
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspace.id)));
-    if (!project) throw new Error('Project not found.');
+      .from(teams)
+      .where(and(eq(teams.id, teamId), eq(teams.workspaceId, workspace.id)));
+    if (!team) throw new Error('Team not found.');
 
     const status = data.statusId
       ? statuses.find((item) => item.id === data.statusId)
@@ -568,23 +831,20 @@ export const createIssueFn = createServerFn({ method: 'POST' })
       if (member.length === 0) throw new Error('Pick a teammate in this workspace.');
     }
 
-    const [maxRow] = await db
-      .select({ max: sql<number>`coalesce(max(${issues.number}), 0)` })
-      .from(issues)
-      .where(eq(issues.projectId, project.id));
-    const number = Number(maxRow?.max ?? 0) + 1;
     const issueId = newId();
+    // The number is computed inside the insert so two concurrent creates cannot pick the same one.
     await db.insert(issues).values({
       id: issueId,
       workspaceId: workspace.id,
-      projectId: project.id,
-      number,
+      teamId: team.id,
+      number: sql`(select coalesce(max(${issues.number}), 0) + 1 from ${issues} where ${issues.teamId} = ${team.id})`,
       title: data.title,
       description: data.description,
       status: status.id,
       priority: data.priority,
       assigneeId: data.assigneeId ?? null,
       parentIssueId: data.parentIssueId ?? null,
+      projectId: data.projectId ? await requireProjectId(workspace.id, data.projectId) : null,
       startDate: data.startDate ?? null,
       dueDate: data.dueDate ?? null,
       createdBy: me.id,
@@ -603,8 +863,42 @@ export const createIssueFn = createServerFn({ method: 'POST' })
       }
     }
 
-    return { issueId, key: `${project.key}-${number}` };
+    const [created] = await db
+      .select({ number: issues.number })
+      .from(issues)
+      .where(eq(issues.id, issueId));
+    await recordIssueEvent(issueId, me.id, 'created');
+    if (data.assigneeId) {
+      await notify({
+        workspaceId: workspace.id,
+        userIds: [data.assigneeId],
+        actorId: me.id,
+        kind: 'issue_assigned',
+        issueId,
+        body: data.title,
+      });
+    }
+    return { issueId, key: `${team.key}-${created?.number ?? ''}` };
   });
+
+const MAX_PARENT_DEPTH = 50;
+
+/** The parent must be another issue in the workspace, and not one of the issue's own sub-issues. */
+async function assertValidParent(workspaceId: string, issueId: string, parentId: string) {
+  if (parentId === issueId) throw new Error('An issue cannot be its own parent.');
+  let cursor: string | null = parentId;
+  for (let depth = 0; cursor && depth < MAX_PARENT_DEPTH; depth++) {
+    const [row] = await db
+      .select({ workspaceId: issues.workspaceId, parentId: issues.parentIssueId })
+      .from(issues)
+      .where(eq(issues.id, cursor));
+    if (!row || row.workspaceId !== workspaceId) throw new Error('Parent issue not found.');
+    if (row.parentId === issueId) {
+      throw new Error('That issue is already below this one. Pick a parent outside its sub-issues.');
+    }
+    cursor = row.parentId;
+  }
+}
 
 export const updateIssueFn = createServerFn({ method: 'POST' })
   .validator(
@@ -615,15 +909,23 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
       statusId: z.string().optional(),
       priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
       assigneeId: z.string().nullable().optional(),
-      labelIds: z.array(z.string()).optional(),
+      labelIds: idListSchema.optional(),
       startDate: dateSchema.nullable().optional(),
       dueDate: dateSchema.nullable().optional(),
+      // A sub-issue is an ordinary issue with a parent; null detaches it.
+      parentIssueId: z.string().max(64).nullable().optional(),
+      projectId: z.string().max(64).nullable().optional(),
     }),
   )
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const issue = await requireIssue(data.issueId, me.id);
+    if (data.projectId) await requireProjectId(issue.workspaceId, data.projectId);
+    const before = await issueRowById(data.issueId);
+    const labelsBefore =
+      data.labelIds !== undefined ? (await issueLabelsFor([data.issueId])).get(data.issueId) ?? [] : [];
+    if (data.parentIssueId) await assertValidParent(issue.workspaceId, data.issueId, data.parentIssueId);
     if (data.assigneeId) {
       const member = await db
         .select({ userId: workspaceMembers.userId })
@@ -657,6 +959,8 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
     if (data.assigneeId !== undefined) set.assigneeId = data.assigneeId;
     if (data.startDate !== undefined) set.startDate = data.startDate;
     if (data.dueDate !== undefined) set.dueDate = data.dueDate;
+    if (data.parentIssueId !== undefined) set.parentIssueId = data.parentIssueId;
+    if (data.projectId !== undefined) set.projectId = data.projectId;
     const nextStart = data.startDate !== undefined ? data.startDate : issue.startDate;
     const nextDue = data.dueDate !== undefined ? data.dueDate : issue.dueDate;
     if (nextStart && nextDue && nextDue < nextStart) {
@@ -681,8 +985,52 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
         }
       }
     }
+
+    // History and inbox. Reading the row again gives display names for whatever changed.
+    const after = await issueRowById(data.issueId);
+    if (before && after) {
+      let labelChange: { added: string[]; removed: string[] } | undefined;
+      if (data.labelIds !== undefined) {
+        const labelsAfter = (await issueLabelsFor([data.issueId])).get(data.issueId) ?? [];
+        labelChange = {
+          added: labelsAfter.filter((l) => !labelsBefore.some((b) => b.id === l.id)).map((l) => l.name),
+          removed: labelsBefore.filter((b) => !labelsAfter.some((l) => l.id === b.id)).map((b) => b.name),
+        };
+      }
+      await recordChanges(before, after, me.id, labelChange);
+      if (after.assigneeId && after.assigneeId !== before.assigneeId) {
+        await notify({
+          workspaceId: issue.workspaceId,
+          userIds: [after.assigneeId],
+          actorId: me.id,
+          kind: 'issue_assigned',
+          issueId: data.issueId,
+          body: after.title,
+        });
+      }
+      if (after.statusId !== before.statusId) {
+        await notify({
+          workspaceId: issue.workspaceId,
+          userIds: await issueSubscribers(data.issueId),
+          actorId: me.id,
+          kind: 'issue_status',
+          issueId: data.issueId,
+          body: after.statusName,
+        });
+      }
+    }
     return { ok: true as const };
   });
+
+/** Returns the project id when it belongs to the workspace; throws otherwise. */
+async function requireProjectId(workspaceId: string, projectId: string) {
+  const [row] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
+  if (!row) throw new Error('Project not found.');
+  return row.id;
+}
 
 export const deleteIssueFn = createServerFn({ method: 'POST' })
   .validator(z.object({ issueId: z.string() }))
@@ -700,7 +1048,7 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    await requireIssue(data.issueId, me.id);
+    const issue = await requireIssue(data.issueId, me.id);
     const commentId = newId();
     await db.insert(issueComments).values({
       id: commentId,
@@ -712,6 +1060,19 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
       .update(issues)
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(issues.id, data.issueId));
+    await notify({
+      workspaceId: issue.workspaceId,
+      userIds: await issueSubscribers(data.issueId),
+      actorId: me.id,
+      kind: 'issue_comment',
+      issueId: data.issueId,
+      body: data.body,
+    });
+    // Posting ends the typing state right away instead of waiting for it to expire.
+    await db
+      .update(issueEditors)
+      .set({ typingAt: null })
+      .where(and(eq(issueEditors.issueId, data.issueId), eq(issueEditors.userId, me.id)));
     const [row] = await db
       .select({
         id: issueComments.id,
@@ -964,3 +1325,131 @@ export const deleteTaskStatusFn = createServerFn({ method: 'POST' })
     await db.delete(taskStatuses).where(eq(taskStatuses.id, status.id));
     return { moved: count };
   });
+
+export const createTeamFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      slug: z.string(),
+      name: z.string().trim().min(1, 'Give the team a name').max(40),
+      key: z
+        .string()
+        .trim()
+        .transform((value) => value.toUpperCase())
+        .refine((value) => TEAM_KEY.test(value), 'Use 2 to 5 letters or digits, starting with a letter.'),
+      color: colorSchema.optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const { workspace } = await workspaceForSlug(data.slug, me.id);
+    const [taken] = await db
+      .select({ id: teams.id })
+      .from(teams)
+      .where(and(eq(teams.workspaceId, workspace.id), eq(teams.key, data.key)));
+    if (taken) throw new Error(`Another team already uses the key ${data.key}.`);
+    const id = newId();
+    await db.insert(teams).values({
+      id,
+      workspaceId: workspace.id,
+      name: data.name,
+      key: data.key,
+      color: data.color ?? colorForLabel(data.name),
+      createdBy: me.id,
+    });
+    return { id, key: data.key };
+  });
+
+const projectStatusSchema = z.enum(PROJECT_STATUSES);
+
+export const createProjectFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      slug: z.string(),
+      name: z.string().trim().min(1, 'Give the project a name').max(60),
+      description: z.string().max(2000).default(''),
+      color: colorSchema.optional(),
+      status: projectStatusSchema.default('planned'),
+      leadId: z.string().max(64).nullable().optional(),
+      startDate: dateSchema.nullable().optional(),
+      targetDate: dateSchema.nullable().optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const { workspace } = await workspaceForSlug(data.slug, me.id);
+    if (data.leadId) await requireMember(workspace.id, data.leadId);
+    if (data.startDate && data.targetDate && data.targetDate < data.startDate) {
+      throw new Error('The target date cannot be before the start date.');
+    }
+    const id = newId();
+    await db.insert(projects).values({
+      id,
+      workspaceId: workspace.id,
+      name: data.name,
+      description: data.description,
+      color: data.color ?? colorForLabel(data.name),
+      status: data.status,
+      leadId: data.leadId ?? null,
+      startDate: data.startDate ?? null,
+      targetDate: data.targetDate ?? null,
+      createdBy: me.id,
+    });
+    return { id };
+  });
+
+export const updateProjectFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      projectId: z.string(),
+      name: z.string().trim().min(1).max(60).optional(),
+      description: z.string().max(2000).optional(),
+      color: colorSchema.optional(),
+      status: projectStatusSchema.optional(),
+      leadId: z.string().max(64).nullable().optional(),
+      startDate: dateSchema.nullable().optional(),
+      targetDate: dateSchema.nullable().optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const [project] = await db.select().from(projects).where(eq(projects.id, data.projectId));
+    if (!project) throw new Error('Project not found.');
+    await requireWorkspace(project.workspaceId, me.id);
+    if (data.leadId) await requireMember(project.workspaceId, data.leadId);
+    const start = data.startDate !== undefined ? data.startDate : project.startDate;
+    const target = data.targetDate !== undefined ? data.targetDate : project.targetDate;
+    if (start && target && target < start) {
+      throw new Error('The target date cannot be before the start date.');
+    }
+    const { projectId, ...changes } = data;
+    await db
+      .update(projects)
+      .set({ ...changes, updatedAt: new Date().toISOString() })
+      .where(eq(projects.id, projectId));
+    return { ok: true as const };
+  });
+
+export const deleteProjectFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ projectId: z.string() }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const [project] = await db.select().from(projects).where(eq(projects.id, data.projectId));
+    if (!project) throw new Error('Project not found.');
+    await requireWorkspace(project.workspaceId, me.id);
+    // Issues stay; they just leave the project (the foreign key also does this on delete).
+    await db.update(issues).set({ projectId: null }).where(eq(issues.projectId, data.projectId));
+    await db.delete(projects).where(eq(projects.id, data.projectId));
+    return { ok: true as const };
+  });
+
+async function requireMember(workspaceId: string, userId: string) {
+  const [row] = await db
+    .select({ userId: workspaceMembers.userId })
+    .from(workspaceMembers)
+    .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
+  if (!row) throw new Error('Pick a teammate in this workspace.');
+}

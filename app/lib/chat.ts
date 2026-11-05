@@ -10,6 +10,7 @@ import {
   isNull,
   lt,
   ne,
+  or,
   sql,
 } from 'void/db';
 import {
@@ -20,23 +21,31 @@ import {
   channelMembers,
   channels,
   messages,
+  issues,
   reactions,
+  taskStatuses,
+  teams,
   users,
   workspaceMembers,
   workspaces,
 } from '@schema';
 import { z } from 'zod';
 import { readSessionUser } from './session';
+import { issueIdsForKeys, issueKeysIn, issueSubscribers, notify, recordIssueEvent } from './activity';
 import { newId, newInviteCode, slugify } from './ids';
-import { mentionHandle } from './mentions';
+import { mentionHandle, mentionLookup } from './mentions';
 import { toUserSummary } from './people';
 import { memberUsers, requireChannel, requireUser, requireWorkspace, touchPresence } from './server';
 import type {
   CallView,
   ChannelSummary,
   DmSummary,
+  IssueRef,
   MessageView,
   SearchHit,
+  TaskPriority,
+  TaskStatusCategory,
+  ThreadView,
   UserSummary,
   WorkspaceOverview,
   WorkspaceSnapshot,
@@ -44,6 +53,17 @@ import type {
 
 const LIVE_WINDOW_MS = 75_000;
 const TYPING_WINDOW_MS = 5_000;
+
+const userSelection = {
+  id: users.id,
+  name: users.name,
+  email: users.email,
+  avatarColor: users.avatarColor,
+  title: users.title,
+  statusEmoji: users.statusEmoji,
+  statusText: users.statusText,
+  lastSeenAt: users.lastSeenAt,
+};
 const CALL_STALE_MS = 120_000;
 
 type MessageBase = {
@@ -96,11 +116,157 @@ function authorOf(row: MessageBase): UserSummary {
   };
 }
 
+const HYDRATE_CHUNK = 90;
+const REF_PAIR_CHUNK = 30;
+const STATUS_CATEGORIES: TaskStatusCategory[] = [
+  'backlog',
+  'unstarted',
+  'started',
+  'completed',
+  'canceled',
+];
+const TASK_PRIORITIES: TaskPriority[] = [0, 1, 2, 3, 4];
+
+/** Message text with code removed, so `KOR-1` in a code span is not a reference. */
+function proseOf(body: string) {
+  return body.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
+}
+
+function issueKeysInBody(body: string) {
+  return issueKeysIn(proseOf(body));
+}
+
+/**
+ * Resolves the issue keys in a page of messages with one query per workspace (almost always one).
+ * Each statement binds two parameters per key plus the workspace, so keys go in chunks of 30.
+ */
+async function issueRefsForMessages(rows: MessageBase[]) {
+  const refsByMessage = new Map<string, IssueRef[]>();
+  const keysByMessage = new Map<string, string[]>();
+  for (const row of rows) {
+    if (row.deletedAt) continue;
+    const keys = issueKeysInBody(row.body);
+    if (keys.length > 0) keysByMessage.set(row.id, keys);
+  }
+  if (keysByMessage.size === 0) return refsByMessage;
+
+  const channelIds = [...new Set(rows.filter((row) => keysByMessage.has(row.id)).map((row) => row.channelId))];
+  const channelRows = await db
+    .select({ id: channels.id, workspaceId: channels.workspaceId })
+    .from(channels)
+    .where(inArray(channels.id, channelIds));
+  const workspaceOfChannel = new Map(channelRows.map((row) => [row.id, row.workspaceId]));
+
+  const keysByWorkspace = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const keys = keysByMessage.get(row.id);
+    const workspaceId = workspaceOfChannel.get(row.channelId);
+    if (!keys || !workspaceId) continue;
+    const set = keysByWorkspace.get(workspaceId) ?? new Set<string>();
+    for (const key of keys) set.add(key);
+    keysByWorkspace.set(workspaceId, set);
+  }
+
+  const refByWorkspaceKey = new Map<string, IssueRef>();
+  const now = Date.now();
+  const lookups: Promise<void>[] = [];
+  for (const [workspaceId, keySet] of keysByWorkspace) {
+    const keys = [...keySet];
+    for (let start = 0; start < keys.length; start += REF_PAIR_CHUNK) {
+      const pairs = keys.slice(start, start + REF_PAIR_CHUNK).map((key) => {
+        const [teamKey, number] = key.split('-');
+        return and(eq(teams.key, teamKey), eq(issues.number, Number(number)));
+      });
+      lookups.push(
+        db
+          .select({
+            id: issues.id,
+            number: issues.number,
+            title: issues.title,
+            priority: issues.priority,
+            teamKey: teams.key,
+            statusId: taskStatuses.id,
+            statusName: taskStatuses.name,
+            statusCategory: taskStatuses.category,
+            statusColor: taskStatuses.color,
+            statusPosition: taskStatuses.position,
+            assigneeId: users.id,
+            assigneeName: users.name,
+            assigneeEmail: users.email,
+            assigneeAvatarColor: users.avatarColor,
+            assigneeTitle: users.title,
+            assigneeStatusEmoji: users.statusEmoji,
+            assigneeStatusText: users.statusText,
+            assigneeLastSeenAt: users.lastSeenAt,
+          })
+          .from(issues)
+          .innerJoin(teams, eq(teams.id, issues.teamId))
+          .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+          .leftJoin(users, eq(users.id, issues.assigneeId))
+          .where(and(eq(issues.workspaceId, workspaceId), or(...pairs)))
+          .then((found) => {
+            for (const row of found) {
+              const key = `${row.teamKey}-${row.number}`;
+              refByWorkspaceKey.set(`${workspaceId}:${key}`, {
+                id: row.id,
+                key,
+                title: row.title,
+                status: {
+                  id: row.statusId,
+                  name: row.statusName,
+                  category: STATUS_CATEGORIES.find((item) => item === row.statusCategory) ?? 'unstarted',
+                  color: row.statusColor,
+                  position: row.statusPosition,
+                },
+                priority: TASK_PRIORITIES.find((item) => item === row.priority) ?? 0,
+                assignee: row.assigneeId
+                  ? toUserSummary(
+                      {
+                        id: row.assigneeId,
+                        name: row.assigneeName ?? '',
+                        email: row.assigneeEmail ?? '',
+                        avatarColor: row.assigneeAvatarColor ?? '',
+                        title: row.assigneeTitle ?? '',
+                        statusEmoji: row.assigneeStatusEmoji ?? '',
+                        statusText: row.assigneeStatusText ?? '',
+                        lastSeenAt: row.assigneeLastSeenAt ?? new Date(0).toISOString(),
+                      },
+                      now,
+                    )
+                  : null,
+              });
+            }
+          }),
+      );
+    }
+  }
+  await Promise.all(lookups);
+
+  for (const row of rows) {
+    const keys = keysByMessage.get(row.id);
+    const workspaceId = workspaceOfChannel.get(row.channelId);
+    if (!keys || !workspaceId) continue;
+    const refs = keys
+      .map((key) => refByWorkspaceKey.get(`${workspaceId}:${key}`))
+      .filter((ref): ref is IssueRef => Boolean(ref));
+    if (refs.length > 0) refsByMessage.set(row.id, refs);
+  }
+  return refsByMessage;
+}
+
 async function hydrateMessages(rows: MessageBase[], viewerId: string): Promise<MessageView[]> {
+  // Each query below binds every id, and D1 allows at most 100 bound parameters per statement.
+  if (rows.length > HYDRATE_CHUNK) {
+    const views: MessageView[] = [];
+    for (let start = 0; start < rows.length; start += HYDRATE_CHUNK) {
+      views.push(...(await hydrateMessages(rows.slice(start, start + HYDRATE_CHUNK), viewerId)));
+    }
+    return views;
+  }
   const ids = rows.map((row) => row.id);
   if (ids.length === 0) return [];
 
-  const [reactionRows, attachmentRows, replyRows] = await Promise.all([
+  const [reactionRows, attachmentRows, replyRows, issueRefMap] = await Promise.all([
     db
       .select({
         messageId: reactions.messageId,
@@ -128,6 +294,7 @@ async function hydrateMessages(rows: MessageBase[], viewerId: string): Promise<M
       .from(messages)
       .where(and(inArray(messages.parentId, ids), isNull(messages.deletedAt)))
       .groupBy(messages.parentId),
+    issueRefsForMessages(rows),
   ]);
 
   const reactionMap = new Map<string, Map<string, { count: number; mine: boolean }>>();
@@ -179,6 +346,7 @@ async function hydrateMessages(rows: MessageBase[], viewerId: string): Promise<M
       attachments: attachmentMap.get(row.id) ?? [],
       replyCount: replyMap.get(row.id)?.count ?? 0,
       lastReplyAt: replyMap.get(row.id)?.last ?? null,
+      issues: issueRefMap.get(row.id) ?? [],
     };
   });
 }
@@ -196,7 +364,11 @@ async function channelSummaries(
     .orderBy(asc(channels.createdAt));
   if (channelRows.length === 0) return [];
 
-  const ids = channelRows.map((channel) => channel.id);
+  // A subquery binds one parameter; listing every channel id would exceed D1's 100-parameter limit.
+  const ids = db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(eq(channels.workspaceId, workspaceId));
   const allMembers = await db
     .select({ channelId: channelMembers.channelId, userId: channelMembers.userId })
     .from(channelMembers)
@@ -264,7 +436,8 @@ async function channelSummaries(
   for (const row of allMembers) {
     memberCount.set(row.channelId, (memberCount.get(row.channelId) ?? 0) + 1);
   }
-  const lastMap = new Map(lastRows.map((row) => [row.channelId, row.last]));  const unreadMap = new Map(unreadRows.map((row) => [row.channelId, Number(row.count)]));
+  const lastMap = new Map(lastRows.map((row) => [row.channelId, row.last]));
+  const unreadMap = new Map(unreadRows.map((row) => [row.channelId, Number(row.count)]));
   const mentionMap = new Map(mentionRows.map((row) => [row.channelId, Number(row.count)]));
   const mine = new Map(memberRows.map((row) => [row.channelId, row]));
 
@@ -558,7 +731,12 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
       ? await db
           .select({ channelId: channelMembers.channelId, userId: channelMembers.userId })
           .from(channelMembers)
-          .where(inArray(channelMembers.channelId, summaries.map((channel) => channel.id)))
+          .where(
+            inArray(
+              channelMembers.channelId,
+              db.select({ id: channels.id }).from(channels).where(eq(channels.workspaceId, workspace.id)),
+            ),
+          )
       : [];
 
     const visibleChannels = summaries.filter(
@@ -599,16 +777,7 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
           .orderBy(desc(messages.createdAt))
           .limit(60),
         db
-          .select({
-            id: users.id,
-            name: users.name,
-            email: users.email,
-            avatarColor: users.avatarColor,
-            title: users.title,
-            statusEmoji: users.statusEmoji,
-            statusText: users.statusText,
-            lastSeenAt: users.lastSeenAt,
-          })
+          .select(userSelection)
           .from(channelMembers)
           .innerJoin(users, eq(users.id, channelMembers.userId))
           .where(
@@ -616,6 +785,7 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
               eq(channelMembers.channelId, selected.id),
               ne(channelMembers.userId, me.id),
               gt(channelMembers.typingAt, new Date(now - TYPING_WINDOW_MS).toISOString()),
+              isNull(channelMembers.typingThreadId),
             ),
           ),
         activeCall(selected.id, now),
@@ -701,18 +871,109 @@ export const getThreadFn = createServerFn({ method: 'GET' })
       .where(and(eq(messages.id, data.messageId), isNull(messages.deletedAt)));
     if (!parent) throw new Error('Message not found.');
     await requireChannel(parent.channelId, me.id);
-    const replies = await db
-      .select(messageSelection)
-      .from(messages)
-      .innerJoin(users, eq(users.id, messages.userId))
-      .where(and(eq(messages.parentId, data.messageId), isNull(messages.deletedAt)))
-      .orderBy(asc(messages.createdAt));
+    const [replies, typingRows] = await Promise.all([
+      db
+        .select(messageSelection)
+        .from(messages)
+        .innerJoin(users, eq(users.id, messages.userId))
+        .where(and(eq(messages.parentId, data.messageId), isNull(messages.deletedAt)))
+        .orderBy(asc(messages.createdAt)),
+      db
+        .select(userSelection)
+        .from(channelMembers)
+        .innerJoin(users, eq(users.id, channelMembers.userId))
+        .where(
+          and(
+            eq(channelMembers.channelId, parent.channelId),
+            eq(channelMembers.typingThreadId, data.messageId),
+            ne(channelMembers.userId, me.id),
+            gt(channelMembers.typingAt, new Date(Date.now() - TYPING_WINDOW_MS).toISOString()),
+          ),
+        ),
+    ]);
     const [parentView, replyViews] = await Promise.all([
       hydrateMessages([parent], me.id),
       hydrateMessages(replies, me.id),
     ]);
-    return { parent: parentView[0], replies: replyViews };
+    return {
+      parent: parentView[0],
+      replies: replyViews,
+      typing: typingRows.map((row) => toUserSummary(row)),
+    } satisfies ThreadView;
   });
+
+/** People who can read a channel: everyone for public ones, its members for private rooms and DMs. */
+async function channelAudience(channel: { channelId: string; kind: string }, userIds: string[]) {
+  if (channel.kind === 'public' || userIds.length === 0) return userIds;
+  const members = await db
+    .select({ userId: channelMembers.userId })
+    .from(channelMembers)
+    .where(eq(channelMembers.channelId, channel.channelId));
+  const inside = new Set(members.map((row) => row.userId));
+  return userIds.filter((id) => inside.has(id));
+}
+
+/**
+ * After a message is stored: writes "mentioned" lines on issues named by key, and inbox items for
+ * those issues' followers, @mentioned teammates and the author of a replied-to thread.
+ */
+async function announceMessage({
+  messageId,
+  body,
+  channel,
+  actor,
+  parentAuthorId,
+}: {
+  messageId: string;
+  body: string;
+  channel: { channelId: string; workspaceId: string; kind: string; name: string };
+  actor: UserSummary;
+  parentAuthorId: string | null;
+}) {
+  const prose = proseOf(body);
+  const workspaceId = channel.workspaceId;
+  const base = { workspaceId, actorId: actor.id, channelId: channel.channelId, messageId, body };
+
+  const issueIds = await issueIdsForKeys(workspaceId, issueKeysIn(prose));
+  const handles = [...new Set([...prose.matchAll(/(?<![\w.-])@([A-Za-z0-9._-]+)/g)].map((match) => match[1].toLowerCase().replace(/[._-]+$/, '')))];
+  const lookup = handles.length > 0 ? mentionLookup(await memberUsers(workspaceId)) : null;
+  const mentioned = new Set<string>();
+  for (const handle of handles) {
+    const person = lookup?.get(handle);
+    if (person && person.id !== actor.id) mentioned.add(person.id);
+  }
+  const mentionedIds = await channelAudience(channel, [...mentioned]);
+
+  const jobs: Promise<unknown>[] = [];
+  const history = channel.kind === 'public';
+  for (const issueId of new Set(issueIds.values())) {
+    if (history) {
+      jobs.push(
+        recordIssueEvent(
+          issueId,
+          actor.id,
+          'mentioned',
+          null,
+          JSON.stringify({
+            channelId: channel.channelId,
+            channelName: channel.name,
+            messageId,
+          }),
+        ),
+      );
+    }
+    jobs.push(
+      issueSubscribers(issueId)
+        .then((followers) => channelAudience(channel, followers))
+        .then((userIds) => notify({ ...base, kind: 'issue_mentioned', userIds, issueId })),
+    );
+  }
+  if (mentionedIds.length > 0) jobs.push(notify({ ...base, kind: 'message_mention', userIds: mentionedIds }));
+  if (parentAuthorId && !mentionedIds.includes(parentAuthorId)) {
+    jobs.push(notify({ ...base, kind: 'thread_reply', userIds: [parentAuthorId] }));
+  }
+  await Promise.all(jobs);
+}
 
 export const sendMessageFn = createServerFn({ method: 'POST' })
   .validator(
@@ -725,16 +986,22 @@ export const sendMessageFn = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }) => {
     const me = await requireUser();
-    await requireChannel(data.channelId, me.id);
+    const channel = await requireChannel(data.channelId, me.id);
     const body = data.body.trim();
     if (!body && data.attachmentIds.length === 0) throw new Error('Write something first.');
+    let parentAuthorId: string | null = null;
     if (data.parentId) {
       const [parent] = await db
-        .select({ channelId: messages.channelId, parentId: messages.parentId })
+        .select({
+          channelId: messages.channelId,
+          parentId: messages.parentId,
+          userId: messages.userId,
+        })
         .from(messages)
         .where(and(eq(messages.id, data.parentId), isNull(messages.deletedAt)));
       if (!parent || parent.channelId !== data.channelId) throw new Error('Thread not found.');
       if (parent.parentId) throw new Error('Reply in the original thread instead.');
+      parentAuthorId = parent.userId;
     }
     const id = newId();
     await db.insert(messages).values({
@@ -758,8 +1025,20 @@ export const sendMessageFn = createServerFn({ method: 'POST' })
     }
     await db
       .update(channelMembers)
-      .set({ lastReadAt: new Date().toISOString(), typingAt: null })
+      .set({ lastReadAt: new Date().toISOString(), typingAt: null, typingThreadId: null })
       .where(and(eq(channelMembers.channelId, data.channelId), eq(channelMembers.userId, me.id)));
+    // The message is saved; a failed history line or inbox item must not fail the send.
+    try {
+      await announceMessage({
+        messageId: id,
+        body,
+        channel,
+        actor: me,
+        parentAuthorId,
+      });
+    } catch (error) {
+      console.error('Could not record message references', error);
+    }
     return { id };
   });
 
@@ -809,13 +1088,23 @@ export const markReadFn = createServerFn({ method: 'POST' })
   });
 
 export const setTypingFn = createServerFn({ method: 'POST' })
-  .validator(z.object({ channelId: z.string(), active: z.boolean() }))
+  .validator(
+    z.object({
+      channelId: z.string(),
+      // The thread's parent message id, when typing a reply instead of a channel message.
+      threadId: z.string().max(64).optional(),
+      active: z.boolean(),
+    }),
+  )
   .handler(async ({ data }) => {
     const me = await requireUser();
     await requireChannel(data.channelId, me.id);
     await db
       .update(channelMembers)
-      .set({ typingAt: data.active ? new Date().toISOString() : null })
+      .set({
+        typingAt: data.active ? new Date().toISOString() : null,
+        typingThreadId: data.active ? (data.threadId ?? null) : null,
+      })
       .where(and(eq(channelMembers.channelId, data.channelId), eq(channelMembers.userId, me.id)));
     return { ok: true as const };
   });

@@ -4,6 +4,17 @@ import type { UserSummary } from './types';
 import { toUserSummary } from './people';
 import { readSessionUser } from './session';
 
+// D1 rejects statements with more than 100 bound parameters, so large id lists are queried in chunks.
+const D1_CHUNK = 90;
+
+export async function inChunks<T>(ids: string[], query: (chunk: string[]) => Promise<T[]>) {
+  const rows: T[] = [];
+  for (let start = 0; start < ids.length; start += D1_CHUNK) {
+    rows.push(...(await query(ids.slice(start, start + D1_CHUNK))));
+  }
+  return rows;
+}
+
 export async function requireUser() {
   const user = await readSessionUser();
   if (!user) throw new Error('Sign in required.');

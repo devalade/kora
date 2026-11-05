@@ -1,14 +1,11 @@
 import { Link } from '@tanstack/react-router';
 import {
-  ArrowLeft,
+  Box,
   CalendarRange,
+  ChevronRight,
   Columns3,
   Command,
-  Inbox,
   Layers,
-  ListTodo,
-  Map as MapIcon,
-  MessageSquare,
   Plus,
   Settings2,
   Tag,
@@ -17,19 +14,24 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { TasksSnapshot } from '../lib/types';
-import type { TasksView } from '../lib/tasks-search';
+import type { TasksSearch, TasksView } from '../lib/tasks-search';
 import { cn } from '../utils/cn';
-import { Avatar } from './avatar';
+import { openNewIssue } from '../lib/new-issue-store';
+import { AppRail } from './app-rail';
 import { LabelManagerDialog } from './label-manager-dialog';
+import { TeamDialog } from './team-dialog';
 import { StatusManagerDialog } from './status-manager-dialog';
-import { TaskStatusIcon } from './task-icons';
+import { ProjectIcon } from './issue-fields';
+import { NewProjectDialog } from './projects';
 
 export function TasksSidebar({
   snapshot,
   mobileOpen,
   onCloseMobile,
   activeView,
+  activeTeam,
   activeProject,
+  activeSection,
   activeLabel,
   activeStatus,
   onCommand,
@@ -39,7 +41,10 @@ export function TasksSidebar({
   mobileOpen: boolean;
   onCloseMobile: () => void;
   activeView?: TasksView | null;
+  activeTeam?: string;
   activeProject?: string;
+  /** Pages that are not a filtered issue list, like the Projects page. */
+  activeSection?: 'projects';
   activeLabel?: string;
   activeStatus?: string;
   onCommand?: () => void;
@@ -47,6 +52,9 @@ export function TasksSidebar({
 }) {
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [labelManagerOpen, setLabelManagerOpen] = useState(false);
+  const [teamDialogOpen, setTeamDialogOpen] = useState(false);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(Boolean(activeLabel));
   const [desktop, setDesktop] = useState(false);
 
   useEffect(() => {
@@ -77,79 +85,12 @@ export function TasksSidebar({
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex w-16 flex-col items-center bg-sidebar py-4">
-          <Link to="/app" className="grid size-10 place-items-center" aria-label="Kora home">
-            <svg width="38" height="38" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-              <rect width="40" height="40" rx="13" fill="#EF5F3E" />
-              <path
-                d="M12 11.5v17M12 20.2l8.2-8.7M12 20.2l8.6 8.3"
-                stroke="#FFF9F3"
-                strokeWidth="3.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M26.5 14.2c2.4 0 4 1.6 4 4.2v7.2c0 2.5-1.6 4.1-4 4.1"
-                stroke="#FFF9F3"
-                strokeWidth="3.4"
-                strokeLinecap="round"
-              />
-              <circle cx="27" cy="20.2" r="1.7" fill="#151B19" />
-            </svg>
-          </Link>
-
-          <div className="mt-6 flex flex-col items-center gap-1.5">
-            <span className="grid size-10 place-items-center rounded-xl bg-white/[0.08] text-white">
-              <ListTodo size={18} />
-            </span>
-            <Link
-              to="/app/$workspaceSlug"
-              params={{ workspaceSlug: snapshot.workspace.slug }}
-              className="grid size-10 place-items-center rounded-xl text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
-              aria-label="Chat"
-              title="Chat"
-            >
-              <MessageSquare size={18} />
-            </Link>
-            <Link
-              to="/app/$workspaceSlug/office"
-              params={{ workspaceSlug: snapshot.workspace.slug }}
-              className="grid size-10 place-items-center rounded-xl text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
-              aria-label="Studio"
-              title="Studio"
-            >
-              <MapIcon size={18} />
-            </Link>
-            {onCommand && (
-              <button
-                type="button"
-                onClick={onCommand}
-                className="grid size-10 place-items-center rounded-xl text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
-                aria-label="Command menu"
-                title="Command menu"
-              >
-                <Command size={18} />
-              </button>
-            )}
-          </div>
-
-          <div className="mt-auto flex flex-col items-center gap-2">
-            <Avatar
-              name={snapshot.me.name}
-              color={snapshot.me.avatarColor}
-              size="sm"
-              online
-              className="[--avatar-ring:#151b19]"
-            />
-            <button
-              type="button"
-              onClick={onSignOut}
-              className="text-[10px] text-sidebar-text transition-colors duration-150 hover:text-white"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
+        <AppRail
+          workspaceSlug={snapshot.workspace.slug}
+          active="tasks"
+          me={snapshot.me}
+          onSignOut={onSignOut}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col bg-sidebar-raised">
           <div className="border-b border-sidebar-line px-4 py-4">
@@ -162,230 +103,210 @@ export function TasksSidebar({
                   Tasks · {snapshot.counts.all} issues
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={onCloseMobile}
-                className="grid size-8 place-items-center rounded-lg text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white md:hidden"
-                aria-label="Close navigation"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-1">
+                {onCommand && (
+                  <button
+                    type="button"
+                    onClick={onCommand}
+                    className="grid size-8 place-items-center rounded-lg text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+                    aria-label="Command menu"
+                    title="Command menu (⌘K)"
+                  >
+                    <Command size={16} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onCloseMobile}
+                  className="grid size-8 place-items-center rounded-lg text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white md:hidden"
+                  aria-label="Close navigation"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
-            <Link
-              to="/app/$workspaceSlug/tasks/new"
-              params={{ workspaceSlug: snapshot.workspace.slug }}
-              search={{ project: activeProject, status: activeStatus }}
-              onClick={onCloseMobile}
+            <button
+              type="button"
+              onClick={() => {
+                onCloseMobile();
+                openNewIssue({ teamId: activeTeam, statusId: activeStatus });
+              }}
+              title="New issue (C)"
               className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-coral text-[13px] font-semibold text-white transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.2,0,0,1)] hover:bg-coral-deep active:scale-[0.97] sm:h-9"
             >
               <Plus size={15} /> New issue
-            </Link>
+            </button>
           </div>
 
           <div className="relative min-h-0 flex-1">
             <nav data-audit-skip="C1" className="scroll-dark h-full overflow-y-auto px-3 py-3">
-            <div className="space-y-0.5">
-              <SidebarLink
-                to="/app/$workspaceSlug/tasks"
-                params={{ workspaceSlug: snapshot.workspace.slug }}
-                search={(prev) => ({
-                  ...prev,
-                  view: 'all',
-                  project: undefined,
-                  label: undefined,
-                  status: undefined,
-                })}
-                active={activeView === 'all' && !activeProject && !activeLabel && !activeStatus}
-                icon={<Layers size={15} />}
-                onClick={onCloseMobile}
-              >
-                All issues
-                <span className="ml-auto text-[11px] text-sidebar-text/70">
-                  {snapshot.counts.all}
-                </span>
-              </SidebarLink>
-              <SidebarLink
-                to="/app/$workspaceSlug/tasks"
-                params={{ workspaceSlug: snapshot.workspace.slug }}
-                search={(prev) => ({
-                  ...prev,
-                  view: 'mine',
-                  project: undefined,
-                  label: undefined,
-                  status: undefined,
-                })}
-                active={activeView === 'mine'}
-                icon={<UserRound size={15} />}
-                onClick={onCloseMobile}
-              >
-                My issues
-                <span className="ml-auto text-[11px] text-sidebar-text/70">
-                  {snapshot.counts.mine}
-                </span>
-              </SidebarLink>
-              <SidebarLink
-                to="/app/$workspaceSlug/tasks"
-                params={{ workspaceSlug: snapshot.workspace.slug }}
-                search={(prev) => ({ ...prev, view: 'board' })}
-                active={activeView === 'board'}
-                icon={<Columns3 size={15} />}
-                onClick={onCloseMobile}
-              >
-                Board
-              </SidebarLink>
-              <SidebarLink
-                to="/app/$workspaceSlug/tasks"
-                params={{ workspaceSlug: snapshot.workspace.slug }}
-                search={(prev) => ({ ...prev, view: 'timeline' })}
-                active={activeView === 'timeline'}
-                icon={<CalendarRange size={15} />}
-                onClick={onCloseMobile}
-              >
-                Timeline
-              </SidebarLink>
-            </div>
-
-            <SectionLabel>Projects</SectionLabel>
-            <div className="space-y-0.5">
-              <SidebarLink
-                to="/app/$workspaceSlug/tasks"
-                params={{ workspaceSlug: snapshot.workspace.slug }}
-                search={(prev) => ({
-                  ...prev,
-                  view: 'all',
-                  project: undefined,
-                  label: undefined,
-                  status: undefined,
-                })}
-                active={!activeProject}
-                icon={<Inbox size={15} />}
-                onClick={onCloseMobile}
-              >
-                All projects
-              </SidebarLink>
-              {snapshot.projects.map((project) => (
+              <div className="space-y-0.5">
                 <SidebarLink
-                  key={project.id}
                   to="/app/$workspaceSlug/tasks"
                   params={{ workspaceSlug: snapshot.workspace.slug }}
-                  search={(prev) => ({
-                    ...prev,
-                    view: 'all',
-                    project: project.id,
-                    label: undefined,
-                    status: undefined,
-                  })}
-                  active={activeProject === project.id}
-                  icon={
-                    <span
-                      className="size-2 rounded-full"
-                      style={{ background: project.color }}
-                    />
+                  search={() => ({ view: 'all' })}
+                  active={
+                    activeView === 'all' && !activeTeam && !activeProject && !activeLabel && !activeStatus
                   }
+                  icon={<Layers size={15} />}
                   onClick={onCloseMobile}
                 >
-                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                  <span className="text-[11px] text-sidebar-text/70">{project.issueCount}</span>
+                  All issues
+                  <span className="ml-auto text-[11px] text-sidebar-text/70">{snapshot.counts.all}</span>
                 </SidebarLink>
-              ))}
-            </div>
-
-            <div className="mt-6 flex items-center justify-between px-2">
-              <p className="text-[12px] font-medium text-sidebar-text/80">Workflow</p>
-              <button
-                type="button"
-                onClick={() => setStatusManagerOpen(true)}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
-              >
-                <Settings2 size={12} /> Manage
-              </button>
-            </div>
-            <div className="mt-1 space-y-0.5">
-              {snapshot.statuses.map((status) => (
                 <SidebarLink
-                  key={status.id}
                   to="/app/$workspaceSlug/tasks"
                   params={{ workspaceSlug: snapshot.workspace.slug }}
-                  search={(prev) => ({
-                    ...prev,
-                    view: 'all',
-                    status: status.id,
-                    project: undefined,
-                    label: undefined,
-                  })}
-                  active={activeStatus === status.id}
-                  icon={<TaskStatusIcon status={status} size={15} />}
+                  search={() => ({ view: 'mine' })}
+                  active={activeView === 'mine'}
+                  icon={<UserRound size={15} />}
                   onClick={onCloseMobile}
                 >
-                  <span className="min-w-0 flex-1 truncate">{status.name}</span>
-                  <span className="text-[11px] text-sidebar-text/70">
-                    {snapshot.counts.byStatus[status.id] ?? 0}
+                  My issues
+                  <span className="ml-auto text-[11px] text-sidebar-text/70">{snapshot.counts.mine}</span>
+                </SidebarLink>
+                <SidebarLink
+                  to="/app/$workspaceSlug/tasks"
+                  params={{ workspaceSlug: snapshot.workspace.slug }}
+                  search={(prev) => ({ ...prev, view: 'board' })}
+                  active={activeView === 'board'}
+                  icon={<Columns3 size={15} />}
+                  onClick={onCloseMobile}
+                >
+                  Board
+                </SidebarLink>
+                <SidebarLink
+                  to="/app/$workspaceSlug/tasks"
+                  params={{ workspaceSlug: snapshot.workspace.slug }}
+                  search={(prev) => ({ ...prev, view: 'timeline' })}
+                  active={activeView === 'timeline'}
+                  icon={<CalendarRange size={15} />}
+                  onClick={onCloseMobile}
+                >
+                  Timeline
+                </SidebarLink>
+              </div>
+
+              <SectionHeader
+                title="Teams"
+                hint="Teams own the issue key, like KOR-12"
+                actionLabel="New team"
+                onAction={() => setTeamDialogOpen(true)}
+              />
+              <div className="space-y-0.5">
+                {snapshot.teams.map((team) => (
+                  <SidebarLink
+                    key={team.id}
+                    to="/app/$workspaceSlug/tasks"
+                    params={{ workspaceSlug: snapshot.workspace.slug }}
+                    search={() => ({ view: 'all', team: team.id })}
+                    active={activeTeam === team.id}
+                    icon={<span className="size-2 rounded-full" style={{ background: team.color }} />}
+                    onClick={onCloseMobile}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{team.name}</span>
+                    <span className="text-[11px] text-sidebar-text/70">{team.key}</span>
+                  </SidebarLink>
+                ))}
+              </div>
+
+              <SectionHeader
+                title="Projects"
+                hint="Projects group issues from any team"
+                actionLabel="New project"
+                onAction={() => setProjectDialogOpen(true)}
+              />
+              <div className="space-y-0.5">
+                <Link
+                  to="/app/$workspaceSlug/tasks/projects"
+                  params={{ workspaceSlug: snapshot.workspace.slug }}
+                  onClick={onCloseMobile}
+                  className={cn(
+                    'flex h-9 w-full items-center gap-2 rounded-lg px-2 text-[13px] transition-colors duration-150 ease-out',
+                    activeSection === 'projects'
+                      ? 'bg-white/[0.07] text-white'
+                      : 'text-sidebar-text hover:bg-white/[0.05] hover:text-white',
+                  )}
+                >
+                  <span className="grid size-4 shrink-0 place-items-center">
+                    <Box size={15} />
                   </span>
-                </SidebarLink>
-              ))}
-            </div>
+                  All projects
+                  <span className="ml-auto text-[11px] text-sidebar-text/70">{snapshot.projects.length}</span>
+                </Link>
+                {snapshot.projects
+                  .filter((project) => project.status === 'started' || project.status === 'planned')
+                  .slice(0, 6)
+                  .map((project) => (
+                    <SidebarLink
+                      key={project.id}
+                      to="/app/$workspaceSlug/tasks"
+                      params={{ workspaceSlug: snapshot.workspace.slug }}
+                      search={() => ({ view: 'all', project: project.id })}
+                      active={activeProject === project.id}
+                      icon={<ProjectIcon color={project.color} size={11} />}
+                      onClick={onCloseMobile}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                      <span className="text-[11px] tabular-nums text-sidebar-text/70">
+                        {project.issueCount === 0
+                          ? '0%'
+                          : `${Math.round((project.doneCount / project.issueCount) * 100)}%`}
+                      </span>
+                    </SidebarLink>
+                  ))}
+              </div>
 
-            <div className="mt-6 flex items-center justify-between px-2">
-              <p className="text-[12px] font-medium text-sidebar-text/80">Labels</p>
               <button
                 type="button"
-                onClick={() => setLabelManagerOpen(true)}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+                onClick={() => setLabelsOpen((current) => !current)}
+                aria-expanded={labelsOpen}
+                className="mt-6 mb-1 flex h-7 w-full items-center gap-1 rounded-md px-2 text-[12px] font-medium text-sidebar-text/80 transition-colors duration-150 hover:text-white"
               >
-                <Settings2 size={12} /> Manage
+                Labels
+                <ChevronRight
+                  size={12}
+                  className={cn('transition-transform duration-150', labelsOpen && 'rotate-90')}
+                />
               </button>
-            </div>
-            <div className="mt-1 space-y-0.5">
-              <SidebarLink
-                to="/app/$workspaceSlug/tasks"
-                params={{ workspaceSlug: snapshot.workspace.slug }}
-                search={(prev) => ({
-                  ...prev,
-                  view: 'all',
-                  label: undefined,
-                  project: undefined,
-                  status: undefined,
-                })}
-                active={!activeLabel}
-                icon={<Tag size={15} />}
-                onClick={onCloseMobile}
-              >
-                All labels
-              </SidebarLink>
-              {snapshot.labels.map((label) => (
-                <SidebarLink
-                  key={label.id}
-                  to="/app/$workspaceSlug/tasks"
-                  params={{ workspaceSlug: snapshot.workspace.slug }}
-                  search={(prev) => ({
-                    ...prev,
-                    view: 'all',
-                    label: label.id,
-                    project: undefined,
-                    status: undefined,
-                  })}
-                  active={activeLabel === label.id}
-                  icon={
-                    <span className="size-2 rounded-full" style={{ background: label.color }} />
-                  }
-                  onClick={onCloseMobile}
-                >
-                  {label.name}
-                </SidebarLink>
-              ))}
-            </div>
+              {labelsOpen && (
+                <div className="space-y-0.5">
+                  {snapshot.labels.map((label) => (
+                    <SidebarLink
+                      key={label.id}
+                      to="/app/$workspaceSlug/tasks"
+                      params={{ workspaceSlug: snapshot.workspace.slug }}
+                      search={() => ({ view: 'all', label: label.id })}
+                      active={activeLabel === label.id}
+                      icon={<span className="size-2 rounded-full" style={{ background: label.color }} />}
+                      onClick={onCloseMobile}
+                    >
+                      {label.name}
+                    </SidebarLink>
+                  ))}
+                </div>
+              )}
             </nav>
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-sidebar-raised via-sidebar-raised/80 to-transparent" />
           </div>
 
-          <div className="border-t border-sidebar-line p-3">
-            <Link
-              to="/app/$workspaceSlug"
-              params={{ workspaceSlug: snapshot.workspace.slug }}
-              className="flex h-9 items-center gap-2 rounded-lg px-3 text-[13px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+          <div className="flex items-center gap-1 border-t border-sidebar-line p-2">
+            <button
+              type="button"
+              onClick={() => setStatusManagerOpen(true)}
+              aria-label="Manage statuses"
+              className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[12px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
             >
-              <ArrowLeft size={15} /> Back to chat
-            </Link>
+              <Settings2 size={13} /> Workflow
+            </button>
+            <button
+              type="button"
+              onClick={() => setLabelManagerOpen(true)}
+              aria-label="Manage labels"
+              className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[12px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+            >
+              <Tag size={13} /> Labels
+            </button>
           </div>
         </div>
       </aside>
@@ -400,7 +321,44 @@ export function TasksSidebar({
         onClose={() => setLabelManagerOpen(false)}
         snapshot={snapshot}
       />
+      <TeamDialog
+        open={teamDialogOpen}
+        onClose={() => setTeamDialogOpen(false)}
+        workspaceSlug={snapshot.workspace.slug}
+      />
+      <NewProjectDialog
+        open={projectDialogOpen}
+        onClose={() => setProjectDialogOpen(false)}
+        snapshot={snapshot}
+      />
     </>
+  );
+}
+
+function SectionHeader({
+  title,
+  hint,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  hint: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="mt-6 mb-1 flex items-center justify-between px-2" title={hint}>
+      <p className="text-[12px] font-medium text-sidebar-text/80">{title}</p>
+      <button
+        type="button"
+        onClick={onAction}
+        aria-label={actionLabel}
+        title={actionLabel}
+        className="grid size-6 place-items-center rounded-md text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+      >
+        <Plus size={13} />
+      </button>
+    </div>
   );
 }
 
@@ -415,17 +373,7 @@ function SidebarLink({
 }: {
   to: '/app/$workspaceSlug/tasks';
   params: { workspaceSlug: string };
-  search: (prev: {
-    view?: TasksView;
-    project?: string;
-    label?: string;
-    status?: string;
-  }) => {
-    view?: TasksView;
-    project?: string;
-    label?: string;
-    status?: string;
-  };
+  search: (prev: TasksSearch) => TasksSearch;
   active: boolean;
   icon: React.ReactNode;
   onClick?: () => void;
@@ -447,11 +395,5 @@ function SidebarLink({
       <span className="grid size-4 shrink-0 place-items-center">{icon}</span>
       {children}
     </Link>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="mt-6 mb-1 px-2 text-[12px] font-medium text-sidebar-text/80">{children}</p>
   );
 }

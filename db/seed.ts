@@ -381,11 +381,11 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     })),
   );
 
-  await db.insert(schema.projects).values([
+  await db.insert(schema.teams).values([
     {
       id: 'p-kora',
       workspaceId: 'ws-kora',
-      name: 'Kora Tasks',
+      name: 'Kora',
       key: 'KOR',
       description: 'The product work behind Kora.',
       color: '#EF5F3E',
@@ -415,94 +415,94 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
 
   const issueRows = [
     {
-      id: 'i-1', projectId: 'p-kora', number: 1, title: 'Ship the Studio virtual office',
+      id: 'i-1', teamId: 'p-kora', number: 1, title: 'Ship the Studio virtual office',
       description: 'A spatial Studio with rooms, live activity, and a huddle that starts in place.',
       status: 'done', priority: 2, assigneeId: 'u-alade', createdAt: at(60), updatedAt: at(6),
     },
     {
-      id: 'i-2', projectId: 'p-kora', number: 2, title: 'Add live presence to the Studio floor',
+      id: 'i-2', teamId: 'p-kora', number: 2, title: 'Add live presence to the Studio floor',
       description: 'Show each person status and what they are doing. Poll every 3s until Durable Objects are available.\n\n### Checklist\n- [x] Presence badges\n- [x] Live activity feed\n- [ ] Move polling to Durable Objects',
       status: 'in_progress', priority: 2, assigneeId: 'u-amina', createdAt: at(90), updatedAt: at(3),
     },
     {
-      id: 'i-3', projectId: 'p-kora', number: 3, title: 'Fix clipped emoji in the reaction bar',
+      id: 'i-3', teamId: 'p-kora', number: 3, title: 'Fix clipped emoji in the reaction bar',
       description: 'The quick reaction bar was clipping taller emoji. More room, higher stacking, and a larger hit area.',
       status: 'done', priority: 1, assigneeId: 'u-alade', createdAt: at(120), updatedAt: at(20),
     },
     {
-      id: 'i-4', projectId: 'p-kora', number: 4, title: 'Tasks: list and board views',
+      id: 'i-4', teamId: 'p-kora', number: 4, title: 'Tasks: list and board views',
       description: 'List grouped by status with virtualized rows, plus a board. Status changes should be optimistic.\n\n### Checklist\n- [x] Virtualized list\n- [x] Board with drag and drop\n- [ ] Command menu\n- [ ] Keyboard shortcuts\n\nShip the **list** first, then reuse the status mutation for the board.',
       status: 'in_progress', priority: 2, assigneeId: 'u-alade', createdAt: at(80), updatedAt: at(2),
     },
     {
-      id: 'i-5', projectId: 'p-kora', number: 5, title: 'Command menu for tasks',
-      description: 'Cmd K to create an issue, jump to a project, or move to chat or Studio.\n\n- [x] Command menu shell\n- [x] Project actions\n- [ ] Create issue action\n\nUse `⌘K` on any task view.',
+      id: 'i-5', teamId: 'p-kora', number: 5, title: 'Command menu for tasks',
+      description: 'Cmd K to create an issue, jump to a team, or move to chat or Studio.\n\n- [x] Command menu shell\n- [x] Team actions\n- [ ] Create issue action\n\nUse `⌘K` on any task view.',
       status: 'todo', priority: 3, assigneeId: 'u-alade', createdAt: at(70), updatedAt: at(8),
     },
     {
-      id: 'i-6', projectId: 'p-kora', number: 6, title: 'Comments and activity on issues',
+      id: 'i-6', teamId: 'p-kora', number: 6, title: 'Comments and activity on issues',
       description: 'Threaded comments on the issue detail panel with author avatars and timestamps.',
       status: 'todo', priority: 3, assigneeId: 'u-kwame', createdAt: at(65), updatedAt: at(12),
     },
     {
-      id: 'i-7', projectId: 'p-kora', number: 7, title: 'Mobile room list',
+      id: 'i-7', teamId: 'p-kora', number: 7, title: 'Mobile room list',
       description: 'At narrow widths, the floor plan becomes a room-by-room list.',
       status: 'done', priority: 3, assigneeId: 'u-amina', createdAt: at(55), updatedAt: at(15),
     },
     {
-      id: 'i-8', projectId: 'p-kora', number: 8, title: 'Agent can pick up a repo issue',
+      id: 'i-8', teamId: 'p-kora', number: 8, title: 'Agent can pick up a repo issue',
       description: 'Connect a repo, assign an issue to the agent, and let it open a branch. Permissions and audit trail first.',
       status: 'backlog', priority: 2, assigneeId: 'u-kwame', createdAt: at(50), updatedAt: at(18),
     },
     {
-      id: 'i-9', projectId: 'p-kora', number: 9, title: 'Project covers from Grok',
+      id: 'i-9', teamId: 'p-kora', number: 9, title: 'Project covers from Grok',
       description: 'Use the Grok-generated isometric board as the empty-state cover.',
       status: 'todo', priority: 4, assigneeId: 'u-zane', createdAt: at(45), updatedAt: at(22),
     },
     {
-      id: 'i-10', projectId: 'p-kora', number: 10, title: 'Keyboard shortcuts j/k and c',
+      id: 'i-10', teamId: 'p-kora', number: 10, title: 'Keyboard shortcuts j/k and c',
       description: 'C for new issue, J/K to move, Enter to open, Escape to close.',
       status: 'todo', priority: 3, assigneeId: 'u-alade', createdAt: at(40), updatedAt: at(26),
     },
     {
-      id: 'i-11', projectId: 'p-kora', number: 11, title: 'Empty states that feel alive',
+      id: 'i-11', teamId: 'p-kora', number: 11, title: 'Empty states that feel alive',
       description: 'Make the empty state feel like a place, not a blank table.',
       status: 'backlog', priority: 4, assigneeId: 'u-amina', createdAt: at(35), updatedAt: at(30),
     },
     {
-      id: 'i-12', projectId: 'p-kora', number: 12, title: 'Search across issues',
-      description: 'Search titles and descriptions across projects.',
+      id: 'i-12', teamId: 'p-kora', number: 12, title: 'Search across issues',
+      description: 'Search titles and descriptions across teams.',
       status: 'todo', priority: 3, assigneeId: 'u-kwame', createdAt: at(30), updatedAt: at(32),
     },
     {
-      id: 'i-13', projectId: 'p-launch', number: 1, title: 'Write the launch post',
+      id: 'i-13', teamId: 'p-launch', number: 1, title: 'Write the launch post',
       description: 'A short launch post with the Studio screenshot and the task app.',
       status: 'in_review', priority: 2, assigneeId: 'u-zane', createdAt: at(25), updatedAt: at(2),
     },
     {
-      id: 'i-14', projectId: 'p-launch', number: 2, title: 'Landing page copy pass',
+      id: 'i-14', teamId: 'p-launch', number: 2, title: 'Landing page copy pass',
       description: 'Tighten the hero, pricing, and the three feature blocks.',
       status: 'todo', priority: 3, assigneeId: 'u-amina', createdAt: at(20), updatedAt: at(9),
     },
     {
-      id: 'i-15', projectId: 'p-kora', number: 13, title: 'Use a full calendar view',
+      id: 'i-15', teamId: 'p-kora', number: 13, title: 'Use a full calendar view',
       description: 'Not now. The list and board cover the daily loop.',
       status: 'canceled', priority: 4, assigneeId: null, createdAt: at(60), updatedAt: at(40),
     },
     {
-      id: 'i-16', projectId: 'p-kora', number: 14, title: 'Virtualize the issue list',
+      id: 'i-16', teamId: 'p-kora', number: 14, title: 'Virtualize the issue list',
       description: 'Keep the list fast as the workspace grows.',
       status: 'done', priority: 3, assigneeId: 'u-alade', parentIssueId: 'i-4',
       createdAt: at(70), updatedAt: at(18),
     },
     {
-      id: 'i-17', projectId: 'p-kora', number: 15, title: 'Board drag and drop',
+      id: 'i-17', teamId: 'p-kora', number: 15, title: 'Board drag and drop',
       description: 'Move cards between workflow statuses with optimistic feedback.',
       status: 'in_progress', priority: 2, assigneeId: 'u-amina', parentIssueId: 'i-4',
       createdAt: at(68), updatedAt: at(4),
     },
     {
-      id: 'i-18', projectId: 'p-kora', number: 16, title: 'Keyboard shortcuts',
+      id: 'i-18', teamId: 'p-kora', number: 16, title: 'Keyboard shortcuts',
       description: 'C, J, K, Enter, and Escape should work across every task view.',
       status: 'todo', priority: 3, assigneeId: 'u-alade', parentIssueId: 'i-4',
       createdAt: at(66), updatedAt: at(11),
@@ -530,6 +530,34 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     'i-18': [1, 5],
   };
 
+  // Projects group issues across teams, with a lead and a target date, like Linear's.
+  await db.insert(schema.projects).values([
+    {
+      id: 'pr-studio', workspaceId: 'ws-kora', name: 'Studio launch', color: '#E0A23B',
+      description: 'The virtual office: rooms, presence and huddles that start in place.',
+      status: 'started', leadId: 'u-amina', startDate: day(-12), targetDate: day(9),
+      createdBy: 'u-alade', createdAt: at(60 * 24 * 7),
+    },
+    {
+      id: 'pr-tasks', workspaceId: 'ws-kora', name: 'Tasks v1', color: '#5B8DEF',
+      description: 'Linear-grade issues: list, board, timeline, sub-issues and history.',
+      status: 'started', leadId: 'u-alade', startDate: day(-8), targetDate: day(5),
+      createdBy: 'u-alade', createdAt: at(60 * 24 * 6),
+    },
+    {
+      id: 'pr-launch', workspaceId: 'ws-kora', name: 'Public launch', color: '#17795F',
+      description: 'Launch post, landing page and the first hundred teams.',
+      status: 'planned', leadId: 'u-zane', startDate: day(2), targetDate: day(21),
+      createdBy: 'u-alade', createdAt: at(60 * 24 * 5),
+    },
+  ]);
+  const projectOf: Record<string, string> = {
+    'i-1': 'pr-studio', 'i-2': 'pr-studio', 'i-7': 'pr-studio',
+    'i-4': 'pr-tasks', 'i-5': 'pr-tasks', 'i-6': 'pr-tasks', 'i-10': 'pr-tasks',
+    'i-12': 'pr-tasks', 'i-16': 'pr-tasks', 'i-17': 'pr-tasks', 'i-18': 'pr-tasks',
+    'i-13': 'pr-launch', 'i-14': 'pr-launch',
+  };
+
   await db.insert(schema.issues).values(
     issueRows.map((row) => {
       const dates = issueDates[row.id] ?? [0, 7];
@@ -540,9 +568,24 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
         startDate: day(dates[0]),
         dueDate: day(dates[1]),
         parentIssueId: (row as { parentIssueId?: string }).parentIssueId ?? null,
+        projectId: projectOf[row.id] ?? null,
       };
     }),
   );
+
+  // History: every issue starts with "created", and a few have moved since.
+  await db.insert(schema.issueEvents).values([
+    ...issueRows.map((row) => ({
+      id: `e-created-${row.id}`, issueId: row.id, actorId: 'u-alade', kind: 'created',
+      createdAt: (row as { createdAt?: string }).createdAt ?? at(60 * 24),
+    })),
+    { id: 'e-1', issueId: 'i-4', actorId: 'u-alade', kind: 'status', fromValue: 'Todo', toValue: 'In Progress', createdAt: at(56) },
+    { id: 'e-2', issueId: 'i-4', actorId: 'u-amina', kind: 'labels', fromValue: null, toValue: 'Frontend', createdAt: at(50) },
+    { id: 'e-3', issueId: 'i-2', actorId: 'u-amina', kind: 'assignee', fromValue: null, toValue: 'Amina Diallo', createdAt: at(41) },
+    { id: 'e-4', issueId: 'i-2', actorId: 'u-amina', kind: 'status', fromValue: 'Todo', toValue: 'In Progress', createdAt: at(40) },
+    { id: 'e-5', issueId: 'i-13', actorId: 'u-zane', kind: 'priority', fromValue: 'Medium', toValue: 'High', createdAt: at(26) },
+    { id: 'e-6', issueId: 'i-1', actorId: 'u-alade', kind: 'status', fromValue: 'In Review', toValue: 'Done', createdAt: at(8) },
+  ]);
 
   await db.insert(schema.issueLabels).values([
     { issueId: 'i-1', labelId: 'l-design' },
@@ -590,6 +633,24 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       id: 'c-4', issueId: 'i-8', userId: 'u-zane',
       body: 'Start with read-only repo access and a branch, not direct pushes.',
       createdAt: at(30),
+    },
+  ]);
+
+  // Alade's inbox: a few things teammates did that concern them.
+  await db.insert(schema.notifications).values([
+    {
+      id: 'n-1', workspaceId: 'ws-kora', userId: 'u-alade', actorId: 'u-amina', kind: 'issue_comment',
+      issueId: 'i-4', body: 'Keep the rows dense. Linears rhythm comes from the 44px row, not the type.',
+      createdAt: at(44),
+    },
+    {
+      id: 'n-2', workspaceId: 'ws-kora', userId: 'u-alade', actorId: 'u-kwame', kind: 'issue_comment',
+      issueId: 'i-2', body: 'Presence is polling every 3s. I will move it to Durable Objects once we have the realtime layer.',
+      createdAt: at(38),
+    },
+    {
+      id: 'n-3', workspaceId: 'ws-kora', userId: 'u-alade', actorId: 'u-zane', kind: 'issue_assigned',
+      issueId: 'i-10', body: 'Keyboard shortcuts j/k and c', createdAt: at(22), readAt: at(20),
     },
   ]);
 });

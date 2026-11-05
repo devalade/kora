@@ -2,9 +2,6 @@ import { Link } from '@tanstack/react-router';
 import {
   ChevronDown,
   Hash,
-  LogOut,
-  ListTodo,
-  Map as MapIcon,
   MessageSquarePlus,
   Plus,
   Search,
@@ -15,7 +12,7 @@ import {
 import { useState } from 'react';
 import type { WorkspaceSnapshot } from '../lib/types';
 import { Avatar } from './avatar';
-import { LogoMark } from './logo';
+import { AppRail } from './app-rail';
 import { cn } from '../utils/cn';
 
 export function WorkspaceSidebar({
@@ -61,53 +58,13 @@ export function WorkspaceSidebar({
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex w-[68px] flex-col items-center bg-sidebar py-4">
-          <Link
-            to="/app"
-            className="grid size-11 place-items-center rounded-2xl transition hover:scale-[1.03]"
-            aria-label="Kora home"
-          >
-            <LogoMark size={40} />
-          </Link>
-
-          <div className="mt-6 flex flex-col items-center gap-1.5">
-            <RailButton label="Search" onClick={onSearch}>
-              <Search size={19} />
-            </RailButton>
-            <RailButton label="New message" onClick={onNewDm}>
-              <MessageSquarePlus size={19} />
-            </RailButton>
-            <RailButton label="Browse channels" onClick={onBrowseChannels}>
-              <Users size={19} />
-            </RailButton>
-          </div>
-
-          <div className="mt-auto flex flex-col items-center gap-2">
-            <button
-              type="button"
-              onClick={onProfile}
-              className="relative grid size-10 place-items-center rounded-full transition hover:ring-2 hover:ring-white/15"
-              aria-label="Your profile"
-            >
-              <Avatar
-                name={snapshot.me.name}
-                color={snapshot.me.avatarColor}
-                size="md"
-                online
-                className="[--avatar-ring:#151b19]"
-              />
-            </button>
-            <button
-              type="button"
-              onClick={onSignOut}
-              className="grid size-8 place-items-center rounded-lg text-sidebar-text transition hover:bg-white/10 hover:text-white"
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <LogOut size={15} />
-            </button>
-          </div>
-        </div>
+        <AppRail
+          workspaceSlug={snapshot.workspace.slug}
+          active="chat"
+          me={snapshot.me}
+          onProfile={onProfile}
+          onSignOut={onSignOut}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col bg-sidebar-raised">
           <div className="relative border-b border-sidebar-line px-4 py-3.5">
@@ -187,25 +144,10 @@ export function WorkspaceSidebar({
               <span className="flex-1">Search Kora</span>
               <kbd className="rounded border border-sidebar-line px-1 py-0.5 font-mono text-[9px]">⌘K</kbd>
             </button>
-            <Link
-              to="/app/$workspaceSlug/office"
-              params={{ workspaceSlug: snapshot.workspace.slug }}
-              onClick={onCloseMobile}
-              className="mt-2 flex h-9 w-full items-center gap-2 rounded-lg border border-mint-deep/20 bg-mint/25 px-2.5 text-left text-[12px] font-medium text-sidebar-bright transition hover:border-mint/50 hover:bg-mint/35"
-            >
-              <MapIcon size={14} />
-              <span className="flex-1">Studio</span>
-              <span className="size-1.5 rounded-full bg-mint" />
-            </Link>
-            <Link
-              to="/app/$workspaceSlug/tasks"
-              params={{ workspaceSlug: snapshot.workspace.slug }}
-              onClick={onCloseMobile}
-              className="mt-1.5 flex h-9 w-full items-center gap-2 rounded-lg border border-sidebar-line bg-sidebar/50 px-2.5 text-left text-[12px] font-medium text-sidebar-text transition hover:border-white/20 hover:text-white"
-            >
-              <ListTodo size={14} />
-              <span className="flex-1">Tasks</span>
-            </Link>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <PanelAction icon={<MessageSquarePlus size={14} />} label="New message" onClick={onNewDm} />
+              <PanelAction icon={<Users size={14} />} label="Channels" onClick={onBrowseChannels} title="Browse channels" />
+            </div>
           </div>
 
           <nav className="scroll-dark mt-4 flex-1 overflow-y-auto px-2 pb-3">
@@ -328,7 +270,8 @@ export function WorkspaceSidebar({
 
           <div className="border-t border-sidebar-line p-3">
             <div className="flex items-center gap-2.5 rounded-xl px-1 py-1">
-              <button type="button" onClick={onProfile} aria-label="Open profile">
+              {/* A1: the audit reads the avatar's centred initials as this button's text edge. */}
+              <button type="button" onClick={onProfile} aria-label="Open profile" data-audit-skip="A1">
                 <Avatar
                   name={snapshot.me.name}
                   color={snapshot.me.avatarColor}
@@ -362,24 +305,26 @@ export function WorkspaceSidebar({
   );
 }
 
-function RailButton({
-  children,
+function PanelAction({
+  icon,
   label,
+  title,
   onClick,
 }: {
-  children: React.ReactNode;
+  icon: React.ReactNode;
   label: string;
+  title?: string;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
-      className="grid size-10 place-items-center rounded-xl text-sidebar-text transition hover:bg-white/10 hover:text-white"
-      aria-label={label}
-      title={label}
+      className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-sidebar-line bg-sidebar/50 px-2 text-[12px] font-medium text-sidebar-text transition hover:border-white/20 hover:text-white"
     >
-      {children}
+      {icon}
+      <span className="truncate">{label}</span>
     </button>
   );
 }

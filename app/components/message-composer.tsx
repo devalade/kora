@@ -4,6 +4,7 @@ import {
   Bold,
   Code2,
   FileText,
+  Hash,
   Italic,
   Link2,
   Loader2,
@@ -13,9 +14,11 @@ import {
   Smile,
   X,
 } from 'lucide-react';
+import { useParams } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { htmlToMarkdown } from '../lib/clipboard';
+import { searchIssueRefsFn, type IssueRefSearch } from '../lib/issue-refs';
 import {
   findMentionTrigger,
   matchMentionPeople,
@@ -25,6 +28,7 @@ import {
 import type { UserSummary } from '../lib/types';
 import { cn } from '../utils/cn';
 import { Avatar } from './avatar';
+import { TaskStatusIcon } from './task-icons';
 
 type Draft = {
   localId: string;
@@ -62,6 +66,20 @@ const EMOJIS = [
 
 const MAX_FILES = 6;
 
+type HashTrigger = { start: number; end: number; query: string };
+type HashItem =
+  | { kind: 'issue'; id: string; issue: IssueRefSearch['issues'][number] }
+  | { kind: 'channel'; id: string; name: string };
+
+/** Finds a `#query` just before the cursor: a channel name or an issue key such as KOR-12. */
+function findHashTrigger(text: string, cursor: number): HashTrigger | null {
+  const before = text.slice(0, Math.max(0, Math.min(cursor, text.length)));
+  const match = before.match(/(^|[\s([{])#([A-Za-z0-9-]{0,40})$/);
+  if (!match) return null;
+  const query = match[2] ?? '';
+  return { start: before.length - query.length - 1, end: cursor, query };
+}
+
 export function MessageComposer({
   channelLabel,
   placeholder,
@@ -88,6 +106,11 @@ export function MessageComposer({
   const [mention, setMention] = useState<MentionTrigger | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  const [hash, setHash] = useState<HashTrigger | null>(null);
+  const [hashIndex, setHashIndex] = useState(0);
+  const [hashResults, setHashResults] = useState<(IssueRefSearch & { query: string }) | null>(null);
+  const { workspaceSlug } = useParams({ strict: false });
+  const hashPopoverRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const emojiPopoverRef = useRef<HTMLDivElement>(null);
@@ -104,6 +127,60 @@ export function MessageComposer({
     () => (mention ? matchMentionPeople(members ?? [], mention.query).slice(0, 8) : []),
     [members, mention],
   );
+
+  // `#` suggests issues and channels. Typing narrows the list; stale replies are dropped.
+  const hashItems = useMemo<HashItem[]>(() => {
+    if (!hash || !hashResults) return [];
+    const issueItems: HashItem[] = hashResults.issues.map((issue) => ({
+      kind: 'issue',
+      id: issue.id,
+      issue,
+    }));
+    const channelItems: HashItem[] = hashResults.channels
+      .slice(0, issueItems.length > 0 ? 4 : 8)
+      .map((channel) => ({ kind: 'channel', id: channel.id, name: channel.name }));
+    // Keys and title matches lead; with nothing typed yet, channels come first as they always did.
+    return hash.query && issueItems.length > 0
+      ? [...issueItems, ...channelItems]
+      : [...channelItems, ...issueItems];
+  }, [hash, hashResults]);
+  const hashActive = hash !== null;
+  const hashQuery = hash?.query ?? '';
+
+  useEffect(() => {
+    if (!hashActive || !workspaceSlug) {
+      setHashResults(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchIssueRefsFn({ data: { workspaceSlug, query: hashQuery } })
+        .then((result) => {
+          if (!cancelled) setHashResults({ ...result, query: hashQuery });
+        })
+        .catch(() => undefined);
+    }, 90);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [hashActive, hashQuery, workspaceSlug]);
+
+  useEffect(() => {
+    if (!hash) return;
+    const active = hashPopoverRef.current?.querySelector('[aria-selected="true"]');
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [hash, hashIndex]);
+
+  useEffect(() => {
+    if (!hash) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (hashPopoverRef.current?.contains(event.target as Node)) return;
+      setHash(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [hash]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem('kora.recentEmojis');
@@ -179,14 +256,32 @@ export function MessageComposer({
   }
 
   function syncMention(value: string, cursor: number) {
-    if (!members?.length) {
-      setMention(null);
-      return;
-    }
-    const trigger = findMentionTrigger(value, cursor);
-    if (trigger) setEmojiOpen(false);
+    const trigger = members?.length ? findMentionTrigger(value, cursor) : null;
+    const hashTrigger = trigger || !workspaceSlug ? null : findHashTrigger(value, cursor);
+    if (trigger || hashTrigger) setEmojiOpen(false);
     setMention(trigger);
     setMentionIndex(0);
+    setHash(hashTrigger);
+    setHashIndex(0);
+  }
+
+  function chooseHash(item: HashItem) {
+    const trigger = hash;
+    if (!trigger) return;
+    // Issues are stored as plain keys, channels as #name. No special markup.
+    const token = item.kind === 'issue' ? `${item.issue.key} ` : `#${item.name} `;
+    const next = body.slice(0, trigger.start) + token + body.slice(trigger.end);
+    setBody(next);
+    setHash(null);
+    markTyping();
+    requestAnimationFrame(() => {
+      const target = textRef.current;
+      if (!target) return;
+      target.focus();
+      const cursor = trigger.start + token.length;
+      target.setSelectionRange(cursor, cursor);
+      resize();
+    });
   }
 
   function replaceSelection(text: string, selectStart: number, selectEnd = selectStart) {
@@ -196,6 +291,7 @@ export function MessageComposer({
     const next = body.slice(0, start) + text + body.slice(end);
     setBody(next);
     setMention(null);
+    setHash(null);
     markTyping();
     requestAnimationFrame(() => {
       const target = textRef.current;
@@ -466,6 +562,30 @@ export function MessageComposer({
         }}
         onPaste={handlePaste}
         onKeyDown={(event) => {
+          if (hash) {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setHash(null);
+              return;
+            }
+            if (hashItems.length > 0) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setHashIndex((current) => (current + 1) % hashItems.length);
+                return;
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setHashIndex((current) => (current - 1 + hashItems.length) % hashItems.length);
+                return;
+              }
+              if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault();
+                chooseHash(hashItems[Math.min(hashIndex, hashItems.length - 1)]);
+                return;
+              }
+            }
+          }
           if (mention) {
             if (event.key === 'Escape') {
               event.preventDefault();
@@ -522,7 +642,7 @@ export function MessageComposer({
           }
         }}
         placeholder={placeholder ?? `Message ${channelLabel}`}
-        className="block max-h-44 min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] leading-6 outline-none placeholder:text-faint"
+        className="block max-h-44 min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[16px] leading-6 outline-none placeholder:text-faint sm:text-[15px]"
         aria-label={`Message ${channelLabel}`}
       />
 
@@ -649,6 +769,76 @@ export function MessageComposer({
           </button>
         </div>
       </div>
+      {hash && hashItems.length > 0 && (
+        <div
+          ref={hashPopoverRef}
+          role="listbox"
+          aria-label="Link an issue or channel"
+          className="popover-in absolute bottom-[calc(100%+10px)] left-3 z-40 w-[min(360px,calc(100%-24px))] overflow-hidden rounded-[16px] border border-line/70 bg-paper shadow-[var(--kora-shadow-popover)]"
+        >
+          <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
+            <span className="text-[10px] font-semibold tracking-[0.1em] text-faint uppercase">
+              Link an issue or channel
+            </span>
+            <span className="text-[10px] text-faint">↑↓ · Enter</span>
+          </div>
+          <div className="scroll-thin max-h-[288px] overflow-y-auto px-1.5 pb-2">
+            {hashItems.map((item, index) => {
+              const active = index === Math.min(hashIndex, hashItems.length - 1);
+              const kind = item.kind;
+              const showLabel = index === 0 || hashItems[index - 1].kind !== kind;
+              return (
+                <div key={`${kind}-${item.id}`}>
+                  {showLabel && (
+                    <p className="px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.08em] text-faint uppercase">
+                      {kind === 'issue' ? 'Issues' : 'Channels'}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setHashIndex(index)}
+                    onClick={() => chooseHash(item)}
+                    className={cn(
+                      'flex h-8 w-full items-center gap-2 rounded-[10px] px-2 text-left transition-colors duration-100',
+                      active ? 'bg-coral-soft/75' : 'hover:bg-line-soft',
+                    )}
+                  >
+                    {item.kind === 'issue' ? (
+                      <>
+                        <TaskStatusIcon status={item.issue.status} size={16} />
+                        <span className="w-[52px] shrink-0 text-[12px] font-medium text-muted tabular-nums">
+                          {item.issue.key}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
+                          {item.issue.title}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Hash size={16} strokeWidth={1.8} className="shrink-0 text-faint" />
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
+                          {item.name}
+                        </span>
+                      </>
+                    )}
+                    {active && (
+                      <span
+                        aria-hidden="true"
+                        className="rounded border border-line bg-paper px-1 py-0.5 font-mono text-[9px] text-faint"
+                      >
+                        Enter
+                      </span>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {mention && (
         <div
           ref={mentionPopoverRef}

@@ -2,8 +2,8 @@ import { cn } from '../utils/cn';
 import { avatarTone, initials } from '../lib/people';
 
 const textSizes = {
-  '2xs': 'text-[8px]',
-  xs: 'text-[9px]',
+  '2xs': 'text-[9px]',
+  xs: 'text-[10px]',
   sm: 'text-[10px]',
   md: 'text-[11px]',
   lg: 'text-xs',
@@ -19,6 +19,18 @@ const outerSizes = {
   lg: 'size-11',
   xl: 'size-16',
   '2xl': 'size-24',
+};
+
+// The tinted ring scales with the avatar. A fixed 2px ring took a fifth of a 20px avatar and made
+// the face look shrunk next to the text beside it.
+const ringSizes = {
+  '2xs': 'p-px',
+  xs: 'p-px',
+  sm: 'p-[2px]',
+  md: 'p-[2px]',
+  lg: 'p-[2px]',
+  xl: 'p-[3px]',
+  '2xl': 'p-1',
 };
 
 const statusDotSizes = {
@@ -51,7 +63,8 @@ export function Avatar({
     <span className={cn('relative inline-grid shrink-0 rounded-full', outerSizes[size], className)}>
       <span
         className={cn(
-          'grid size-full place-items-center rounded-full p-[2px]',
+          'grid size-full place-items-center rounded-full',
+          ringSizes[size],
           ring && 'ring-2 ring-paper',
         )}
         style={{ background: tone.ring }}
@@ -60,6 +73,7 @@ export function Avatar({
         <span
           className={cn(
             'grid size-full place-items-center rounded-full font-semibold tracking-wide select-none',
+            (size === '2xs' || size === 'xs') && 'tracking-normal',
             textSizes[size],
           )}
           style={{ background: tone.bg, color: tone.fg }}

@@ -45,6 +45,8 @@ import {
   TaskStatusIcon,
 } from '../components/task-icons';
 import { TasksSidebar } from '../components/tasks-sidebar';
+import { NewIssueModal } from '../components/new-issue';
+import { openNewIssue } from '../lib/new-issue-store';
 import { cn } from '../utils/cn';
 
 const useIsomorphicLayoutEffect =
@@ -87,15 +89,18 @@ function TasksPage() {
   const justMovedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [updating, setUpdating] = useState(false);
   const requestRef = useRef(0);
-  const lastActionRef = useRef({ key: '', at: 0 });
   const lastQuickAddRef = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const view: TasksView = search.view ?? 'all';
+  const teamFilter = search.team;
   const projectFilter = search.project;
   const labelFilter = search.label;
   const statusFilter = search.status;
   const me = snapshot.me;
+  const selectedTeam = teamFilter
+    ? snapshot.teams.find((team) => team.id === teamFilter) ?? null
+    : null;
   const selectedProject = projectFilter
     ? snapshot.projects.find((project) => project.id === projectFilter) ?? null
     : null;
@@ -110,7 +115,8 @@ function TasksPage() {
     const needle = query.trim().toLowerCase();
     return snapshot.issues.filter((issue) => {
       if (view === 'mine' && issue.assignee?.id !== me.id) return false;
-      if (projectFilter && issue.project.id !== projectFilter) return false;
+      if (teamFilter && issue.team.id !== teamFilter) return false;
+      if (projectFilter && issue.project?.id !== projectFilter) return false;
       if (labelFilter && !issue.labels.some((label) => label.id === labelFilter)) return false;
       if (statusFilter && issue.status.id !== statusFilter) return false;
       if (needle) {
@@ -119,7 +125,7 @@ function TasksPage() {
       }
       return true;
     });
-  }, [snapshot.issues, view, me.id, projectFilter, labelFilter, statusFilter, query]);
+  }, [snapshot.issues, view, me.id, teamFilter, projectFilter, labelFilter, statusFilter, query]);
 
   const grouped = useMemo(() => {
     const groups = snapshot.statuses
@@ -246,11 +252,8 @@ function TasksPage() {
     });
   }
 
-  function newIssueSearch() {
-    return {
-      project: projectFilter,
-      status: statusFilter,
-    };
+  function newIssueDefaults() {
+    return { teamId: teamFilter, statusId: statusFilter, projectId: projectFilter };
   }
 
   const openIssue = useCallback(
@@ -297,15 +300,6 @@ function TasksPage() {
     }
   }
 
-  function isRapidRepeat(key: string) {
-    const now = Date.now();
-    if (lastActionRef.current.key === key && now - lastActionRef.current.at < 300) {
-      return true;
-    }
-    lastActionRef.current = { key, at: now };
-    return false;
-  }
-
   function anchorHeightChange(delta: number) {
     const container = parentRef.current;
     if (!container) return;
@@ -313,8 +307,9 @@ function TasksPage() {
     setBottomSpace(Math.max(0, container.scrollTop + container.clientHeight - nextTotal));
   }
 
+  // Every click toggles, as in Linear. A repeat guard here swallowed the second click when you
+  // collapsed a group and immediately opened it again.
   function toggleGroup(statusId: string) {
-    if (isRapidRepeat(`group:${statusId}`)) return;
     const isCollapsing = !collapsedStatuses.has(statusId);
     const issueCount = filtered.filter((issue) => issue.status.id === statusId).length;
     const quickAddHeight = quickAddStatus === statusId ? 56 : 0;
@@ -333,7 +328,6 @@ function TasksPage() {
   }
 
   function openQuickAdd(statusId: string) {
-    if (isRapidRepeat(`quick:${statusId}`)) return;
     const isClosing = quickAddStatus === statusId;
     const isSwitching = quickAddStatus !== null && quickAddStatus !== statusId;
     const isCollapsed = collapsedStatuses.has(statusId);
@@ -365,24 +359,23 @@ function TasksPage() {
         setCommandOpen((open) => !open);
         return;
       }
-      if (typing) return;
+      // Single-key shortcuts must not fire on Cmd+C, Ctrl+J and the like.
+      if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === 'c') {
         event.preventDefault();
-        navigate({
-          to: '/app/$workspaceSlug/tasks/new',
-          params: { workspaceSlug: params.workspaceSlug },
-          search: newIssueSearch(),
-        });
+        openNewIssue(newIssueDefaults());
         return;
       }
       if (event.key === 'j' || event.key === 'k') {
         event.preventDefault();
-        const currentIndex = filtered.findIndex((issue) => issue.id === focusedId);
+        // Walk the rows in on-screen order, skipping issues inside collapsed groups.
+        const visible = grouped.flatMap((item) => (item.type === 'issue' ? [item.issue] : []));
+        const currentIndex = visible.findIndex((issue) => issue.id === focusedId);
         const nextIndex =
           event.key === 'j'
-            ? Math.min(filtered.length - 1, currentIndex < 0 ? 0 : currentIndex + 1)
+            ? Math.min(visible.length - 1, currentIndex < 0 ? 0 : currentIndex + 1)
             : Math.max(0, currentIndex < 0 ? 0 : currentIndex - 1);
-        const next = filtered[nextIndex];
+        const next = visible[nextIndex];
         if (next) {
           setFocusedId(next.id);
           const itemIndex = grouped.findIndex(
@@ -416,13 +409,15 @@ function TasksPage() {
     navigate,
     openIssue,
     params.workspaceSlug,
-    projectFilter,
+    teamFilter,
     statusFilter,
     virtualizer,
   ]);
 
   const title = selectedProject
     ? selectedProject.name
+    : selectedTeam
+    ? selectedTeam.name
     : selectedStatus
       ? selectedStatus.name
       : view === 'board'
@@ -433,7 +428,9 @@ function TasksPage() {
             ? 'My issues'
             : 'All issues';
   const subtitle = selectedProject
-    ? selectedProject.description
+    ? selectedProject.description || 'Issues in this project'
+    : selectedTeam
+    ? selectedTeam.description
     : view === 'mine'
       ? 'Assigned to you'
       : view === 'board'
@@ -441,7 +438,9 @@ function TasksPage() {
         : view === 'timeline'
           ? 'Plan the weeks around what matters'
           : 'The work behind Kora';
-  const hasFilters = Boolean(projectFilter || labelFilter || statusFilter || query.trim());
+  const hasFilters = Boolean(
+    teamFilter || projectFilter || labelFilter || statusFilter || query.trim(),
+  );
 
   return (
     <div className="flex h-dvh overflow-hidden bg-canvas">
@@ -450,6 +449,7 @@ function TasksPage() {
         mobileOpen={sidebarOpen}
         onCloseMobile={() => setSidebarOpen(false)}
         activeView={view}
+        activeTeam={teamFilter}
         activeProject={projectFilter}
         activeLabel={labelFilter}
         activeStatus={statusFilter}
@@ -474,10 +474,10 @@ function TasksPage() {
 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              {selectedProject && (
+              {selectedTeam && (
                 <span
                   className="size-2 rounded-full"
-                  style={{ background: selectedProject.color }}
+                  style={{ background: selectedTeam.color }}
                 />
               )}
               {selectedStatus && (
@@ -543,15 +543,15 @@ function TasksPage() {
               <Command size={16} />
             </button>
 
-            <Link
-              to="/app/$workspaceSlug/tasks/new"
-              params={{ workspaceSlug: params.workspaceSlug }}
-              search={newIssueSearch()}
+            <button
+              type="button"
+              onClick={() => openNewIssue(newIssueDefaults())}
               aria-label="New issue"
+              title="New issue (C)"
               className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-coral px-3 text-[12px] font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-coral-deep active:scale-[0.97] sm:h-9"
             >
               <Plus size={14} /> <span className="hidden sm:inline">New issue</span>
-            </Link>
+            </button>
           </div>
         </header>
 
@@ -617,7 +617,7 @@ function TasksPage() {
               type="button"
               onClick={() => {
                 setQuery('');
-                go({ project: undefined, label: undefined, status: undefined, view: 'all' });
+                go({ team: undefined, project: undefined, label: undefined, status: undefined, view: 'all' });
               }}
               className="inline-flex h-8 shrink-0 items-center rounded-lg px-2 text-[12px] font-medium text-muted transition-colors duration-150 hover:bg-line-soft hover:text-ink"
             >
@@ -637,7 +637,7 @@ function TasksPage() {
             issues={filtered}
             statuses={snapshot.statuses}
             workspaceSlug={params.workspaceSlug}
-            projectFilter={projectFilter}
+            teamFilter={teamFilter}
             activeStatus={statusFilter}
             justMovedId={justMovedId}
             onMove={(issueId, statusId) => void moveIssue(issueId, statusId)}
@@ -654,8 +654,8 @@ function TasksPage() {
             parentRef={parentRef}
             focusedId={focusedId}
             workspaceSlug={params.workspaceSlug}
-            projectFilter={projectFilter}
-            projectId={projectFilter ?? snapshot.projects[0]?.id ?? ''}
+            teamFilter={teamFilter}
+            teamId={teamFilter ?? snapshot.teams[0]?.id ?? ''}
             statusFilter={statusFilter}
             quickAddStatus={quickAddStatus}
             collapsedStatuses={collapsedStatuses}
@@ -671,38 +671,33 @@ function TasksPage() {
             hasFilters={hasFilters}
             onClearFilters={() => {
               setQuery('');
-              go({ project: undefined, label: undefined, status: undefined, view: 'all' });
+              go({ team: undefined, project: undefined, label: undefined, status: undefined, view: 'all' });
             }}
-            newIssueSearch={newIssueSearch}
+            onNewIssue={() => openNewIssue(newIssueDefaults())}
           />
         )}
       </main>
+      <NewIssueModal snapshot={snapshot} />
 
       <TaskCommandMenu
         open={commandOpen}
         onClose={() => setCommandOpen(false)}
         snapshot={snapshot}
-        onNewIssue={() =>
-          navigate({
-            to: '/app/$workspaceSlug/tasks/new',
-            params: { workspaceSlug: params.workspaceSlug },
-            search: newIssueSearch(),
-          })
-        }
+        onNewIssue={() => openNewIssue(newIssueDefaults())}
         onView={(next) =>
           go(
             next === 'board'
               ? { view: 'board' }
               : {
                   view: next,
-                  project: undefined,
+                  team: undefined,
                   label: undefined,
                   status: undefined,
                 },
           )
         }
-        onProject={(id) =>
-          go({ view: 'all', project: id, label: undefined, status: undefined })
+        onTeam={(id) =>
+          go({ view: 'all', team: id, label: undefined, status: undefined })
         }
         onChat={() =>
           void navigate({
@@ -756,8 +751,8 @@ function IssueList({
   parentRef,
   focusedId,
   workspaceSlug,
-  projectFilter,
-  projectId,
+  teamFilter,
+  teamId,
   statusFilter,
   quickAddStatus,
   collapsedStatuses,
@@ -772,15 +767,15 @@ function IssueList({
   empty,
   hasFilters,
   onClearFilters,
-  newIssueSearch,
+  onNewIssue,
 }: {
   items: ListItem[];
   virtualizer: Virtualizer<HTMLDivElement, Element>;
   parentRef: React.RefObject<HTMLDivElement | null>;
   focusedId: string | null;
   workspaceSlug: string;
-  projectFilter?: string;
-  projectId: string;
+  teamFilter?: string;
+  teamId: string;
   statusFilter?: string;
   quickAddStatus: string | null;
   collapsedStatuses: Set<string>;
@@ -795,7 +790,7 @@ function IssueList({
   empty: boolean;
   hasFilters: boolean;
   onClearFilters: () => void;
-  newIssueSearch: () => { project?: string; status?: string };
+  onNewIssue: () => void;
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
@@ -826,14 +821,13 @@ function IssueList({
               Clear filters
             </button>
           )}
-          <Link
-            to="/app/$workspaceSlug/tasks/new"
-            params={{ workspaceSlug }}
-            search={newIssueSearch()}
+          <button
+            type="button"
+            onClick={onNewIssue}
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-[13px] font-semibold text-paper transition-colors duration-150 hover:bg-ink-soft"
           >
             <Plus size={15} /> New issue
-          </Link>
+          </button>
         </div>
       </div>
     );
@@ -927,7 +921,7 @@ function IssueList({
                 <QuickAddRow
                   status={item.status}
                   workspaceSlug={workspaceSlug}
-                  projectId={projectId}
+                  teamId={teamId}
                   onCreated={onQuickAddCreated}
                   onCancel={onQuickAddCancel}
                 />
@@ -1067,13 +1061,13 @@ function SubIssueBadge({ issue, className }: { issue: TaskIssue; className?: str
 function QuickAddRow({
   status,
   workspaceSlug,
-  projectId,
+  teamId,
   onCreated,
   onCancel,
 }: {
   status: TaskStatus;
   workspaceSlug: string;
-  projectId: string;
+  teamId: string;
   onCreated: () => Promise<void>;
   onCancel: () => void;
 }) {
@@ -1088,8 +1082,8 @@ function QuickAddRow({
   async function submit() {
     const next = title.trim();
     if (!next || saving) return;
-    if (!projectId) {
-      toast.error('Create a project before adding an issue.');
+    if (!teamId) {
+      toast.error('Create a team before adding an issue.');
       return;
     }
     setSaving(true);
@@ -1097,7 +1091,7 @@ function QuickAddRow({
       const result = await createIssueFn({
         data: {
           slug: workspaceSlug,
-          projectId,
+          teamId,
           title: next,
           statusId: status.id,
           description: '',
@@ -1137,16 +1131,15 @@ function QuickAddRow({
         aria-label={`New ${status.name} issue title`}
         className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-canvas px-3 text-[16px] outline-none transition-[border-color,box-shadow] duration-150 focus:border-ink/25 focus:shadow-[0_0_0_3px_rgba(23,26,26,0.05)] sm:h-9 sm:text-[13px]"
       />
-      <Link
-        to="/app/$workspaceSlug/tasks/new"
-        params={{ workspaceSlug }}
-        search={{ project: projectId || undefined, status: status.id }}
+      <button
+        type="button"
+        onClick={() => openNewIssue({ teamId: teamId || undefined, statusId: status.id })}
         className="grid size-10 place-items-center rounded-lg text-faint transition-colors duration-150 hover:bg-line-soft hover:text-ink sm:size-9"
-        aria-label="Open the full issue page"
-        title="Open the full issue page"
+        aria-label="Open the issue composer"
+        title="Open the issue composer"
       >
         <ArrowUpRight size={15} />
-      </Link>
+      </button>
       <button
         type="button"
         onClick={() => void submit()}
@@ -1420,7 +1413,7 @@ function BoardView({
   issues,
   statuses,
   workspaceSlug,
-  projectFilter,
+  teamFilter,
   activeStatus,
   justMovedId,
   onMove,
@@ -1428,7 +1421,7 @@ function BoardView({
   issues: TaskIssue[];
   statuses: TaskStatus[];
   workspaceSlug: string;
-  projectFilter?: string;
+  teamFilter?: string;
   activeStatus?: string;
   justMovedId: string | null;
   onMove: (id: string, statusId: string) => void;
@@ -1480,15 +1473,14 @@ function BoardView({
               <TaskStatusIcon status={status} size={15} />
               <span className="text-[13px] font-semibold">{status.name}</span>
               <span className="text-[11px] tabular-nums text-faint">{columnIssues.length}</span>
-              <Link
-                to="/app/$workspaceSlug/tasks/new"
-                params={{ workspaceSlug }}
-                search={{ project: projectFilter, status: status.id }}
+              <button
+                type="button"
+                onClick={() => openNewIssue({ teamId: teamFilter, statusId: status.id })}
                 className="ml-auto grid size-7 place-items-center rounded-md text-faint transition-colors duration-150 hover:bg-line-soft hover:text-ink"
                 aria-label={`New ${status.name} issue`}
               >
                 <Plus size={14} />
-              </Link>
+              </button>
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
               {columnIssues.map((issue) => (

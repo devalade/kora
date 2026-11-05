@@ -3,8 +3,10 @@ import type { MessageView, UserSummary } from '../lib/types';
 import { Avatar } from './avatar';
 import { clockTime, dayLabel, fileSize, fullDate, plural, relativeTime } from '../lib/format';
 import { RichText } from './rich-text';
+import { IssueEmbeds } from './issue-embed';
 import { MessageLinkPreviews } from './link-preview';
 import { cn } from '../utils/cn';
+import { useDisplayTimeZone } from '../lib/use-display-time-zone';
 
 const QUICK_REACTIONS = ['👍', '🎉', '❤️'];
 
@@ -43,6 +45,7 @@ export function MessageList({
   onImageOpen: (url: string, name: string) => void;
   onMentionClick?: (userId: string) => void;
 }) {
+  const timeZone = useDisplayTimeZone();
   return (
     <div className="pb-2">
       {hasMore && (
@@ -81,7 +84,8 @@ export function MessageList({
           messages.map((message, index) => {
             const previous = messages[index - 1];
             const newDay =
-              !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
+              !previous ||
+              dayLabel(previous.createdAt, timeZone) !== dayLabel(message.createdAt, timeZone);
             const sameAuthor = previous && previous.author.id === message.author.id;
             const closeInTime =
               previous &&
@@ -94,7 +98,7 @@ export function MessageList({
                   <div className="sticky top-0 z-10 flex items-center gap-3 bg-canvas/92 py-3 backdrop-blur">
                     <span className="h-px flex-1 bg-line" />
                     <span className="rounded-full border border-line bg-paper px-3 py-1 text-[11px] font-semibold tracking-wide text-muted uppercase">
-                      {dayLabel(message.createdAt)}
+                      {dayLabel(message.createdAt, timeZone)}
                     </span>
                     <span className="h-px flex-1 bg-line" />
                   </div>
@@ -148,10 +152,11 @@ function MessageRow({
   onImageOpen: (url: string, name: string) => void;
   onMentionClick?: (userId: string) => void;
 }) {
+  const timeZone = useDisplayTimeZone();
   return (
     <div
       className={cn(
-        'message-row group relative -mx-2 rounded-xl px-2 transition-colors duration-100 hover:bg-paper/80',
+        'message-row group relative -mx-2 rounded-xl px-2 transition-colors duration-100 hover:bg-ink/[0.025]',
         grouped ? 'py-0.5' : 'pt-3 pb-1',
       )}
     >
@@ -176,10 +181,9 @@ function MessageRow({
               </span>
               <span
                 className="text-[11px] text-faint tabular-nums"
-                title={fullDate(message.createdAt)}
-                suppressHydrationWarning
+                title={fullDate(message.createdAt, timeZone)}
               >
-                {clockTime(message.createdAt)}
+                {clockTime(message.createdAt, timeZone)}
               </span>
               {message.author.title && (
                 <span className="hidden text-[11px] text-faint sm:inline">
@@ -193,6 +197,7 @@ function MessageRow({
             <RichText
               body={message.body}
               channelNames={channelNames}
+              issues={message.issues}
               members={members}
               meId={meId}
               onMentionClick={onMentionClick}
@@ -200,6 +205,7 @@ function MessageRow({
             {message.editedAt && <span className="ml-1 text-[11px] text-faint">(edited)</span>}
           </div>
 
+          <IssueEmbeds body={message.body} issues={message.issues} />
           <MessageLinkPreviews body={message.body} />
 
           {message.attachments.length > 0 && (
@@ -321,10 +327,16 @@ function MessageRow({
   );
 }
 
-function TypingRow({ people }: { people: UserSummary[] }) {
+export function TypingRow({
+  people,
+  className = 'pt-3 pb-1 pl-12',
+}: {
+  people: UserSummary[];
+  className?: string;
+}) {
   const names = people.map((person) => person.name.split(' ')[0]);
   return (
-    <div className="flex items-center gap-2 pt-3 pb-1 pl-12 text-xs text-muted">
+    <div className={cn('flex items-center gap-2 text-xs text-muted', className)} aria-live="polite">
       <span className="flex items-end gap-0.5">
         <span className="typing-dot size-1.5 rounded-full bg-faint" />
         <span className="typing-dot size-1.5 rounded-full bg-faint" />

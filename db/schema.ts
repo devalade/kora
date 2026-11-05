@@ -92,6 +92,8 @@ export const channelMembers = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     lastReadAt: text('last_read_at').notNull().default(nowIso),
     typingAt: text('typing_at'),
+    // Set while the member types a thread reply; null means they are typing in the channel.
+    typingThreadId: text('typing_thread_id'),
     joinedAt: text('joined_at').notNull().default(nowIso),
   },
   (table) => [
@@ -279,8 +281,9 @@ export const taskStatuses = sqliteTable(
   ],
 );
 
-export const projects = sqliteTable(
-  'projects',
+// A team owns an issue key (KOR-12) and every issue belongs to exactly one team, as in Linear.
+export const teams = sqliteTable(
+  'teams',
   {
     id: text('id').primaryKey(),
     workspaceId: text('workspace_id')
@@ -296,9 +299,33 @@ export const projects = sqliteTable(
     createdAt: text('created_at').notNull().default(nowIso),
   },
   (table) => [
-    uniqueIndex('projects_workspace_key_idx').on(table.workspaceId, table.key),
-    index('projects_workspace_idx').on(table.workspaceId),
+    uniqueIndex('teams_workspace_key_idx').on(table.workspaceId, table.key),
+    index('teams_workspace_idx').on(table.workspaceId),
   ],
+);
+
+// A project is an optional, time-bound body of work that groups issues across teams.
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    color: text('color').notNull().default('#5B8DEF'),
+    status: text('status').notNull().default('planned'),
+    leadId: text('lead_id').references(() => users.id, { onDelete: 'set null' }),
+    startDate: text('start_date'),
+    targetDate: text('target_date'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: text('created_at').notNull().default(nowIso),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [index('projects_workspace_idx').on(table.workspaceId, table.createdAt)],
 );
 
 export const issues = sqliteTable(
@@ -308,9 +335,10 @@ export const issues = sqliteTable(
     workspaceId: text('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
-    projectId: text('project_id')
+    teamId: text('team_id')
       .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }),
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
     number: integer('number').notNull(),
     title: text('title').notNull(),
     description: text('description').notNull().default(''),
@@ -327,7 +355,8 @@ export const issues = sqliteTable(
     updatedAt: text('updated_at').notNull().default(nowIso),
   },
   (table) => [
-    uniqueIndex('issues_project_number_idx').on(table.projectId, table.number),
+    uniqueIndex('issues_team_number_idx').on(table.teamId, table.number),
+    index('issues_project_idx').on(table.projectId),
     index('issues_workspace_status_idx').on(table.workspaceId, table.status),
     index('issues_assignee_idx').on(table.assigneeId),
     index('issues_parent_idx').on(table.parentIssueId),
@@ -345,6 +374,7 @@ export const issueEditors = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     updatedAt: text('updated_at').notNull().default(nowIso),
+    typingAt: text('typing_at'),
   },
   (table) => [
     primaryKey({ columns: [table.issueId, table.userId] }),
@@ -393,4 +423,47 @@ export const issueComments = sqliteTable(
     createdAt: text('created_at').notNull().default(nowIso),
   },
   (table) => [index('issue_comments_issue_idx').on(table.issueId, table.createdAt)],
+);
+
+// The issue's history line: one row per change, rendered between comments like Linear's activity.
+export const issueEvents = sqliteTable(
+  'issue_events',
+  {
+    id: text('id').primaryKey(),
+    issueId: text('issue_id')
+      .notNull()
+      .references(() => issues.id, { onDelete: 'cascade' }),
+    actorId: text('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    kind: text('kind').notNull(),
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [index('issue_events_issue_idx').on(table.issueId, table.createdAt)],
+);
+
+// The inbox: things that happened to you, per workspace.
+export const notifications = sqliteTable(
+  'notifications',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    actorId: text('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    kind: text('kind').notNull(),
+    issueId: text('issue_id').references(() => issues.id, { onDelete: 'cascade' }),
+    channelId: text('channel_id').references(() => channels.id, { onDelete: 'cascade' }),
+    messageId: text('message_id').references(() => messages.id, { onDelete: 'cascade' }),
+    body: text('body').notNull().default(''),
+    readAt: text('read_at'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [
+    index('notifications_user_idx').on(table.userId, table.workspaceId, table.createdAt),
+    index('notifications_unread_idx').on(table.userId, table.readAt),
+  ],
 );

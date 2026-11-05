@@ -61,6 +61,8 @@ export type MessageView = {
   attachments: AttachmentView[];
   replyCount: number;
   lastReplyAt: string | null;
+  /** Issues named by key (KOR-12) in the body, with live status. Unknown keys are left out. */
+  issues: IssueRef[];
 };
 
 export type CallParticipantView = {
@@ -98,6 +100,7 @@ export type WorkspaceSnapshot = {
 export type ThreadView = {
   parent: MessageView;
   replies: MessageView[];
+  typing: UserSummary[];
 };
 
 export type SearchHit = {
@@ -151,13 +154,29 @@ export type TaskStatus = {
 };
 export type TaskPriority = 0 | 1 | 2 | 3 | 4;
 
-export type TaskProject = {
+export type TaskTeam = {
   id: string;
   name: string;
   key: string;
   color: string;
   description: string;
   issueCount: number;
+};
+
+export type TaskProjectStatus = 'backlog' | 'planned' | 'started' | 'paused' | 'completed' | 'canceled';
+
+/** A Linear-style project: an optional body of work that groups issues across teams. */
+export type TaskProject = {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  status: TaskProjectStatus;
+  lead: UserSummary | null;
+  startDate: string | null;
+  targetDate: string | null;
+  issueCount: number;
+  doneCount: number;
 };
 
 export type TaskLabel = {
@@ -179,7 +198,8 @@ export type TaskIssue = {
   parentId: string | null;
   subIssueCount: number;
   subIssueDone: number;
-  project: { id: string; name: string; key: string; color: string };
+  team: { id: string; name: string; key: string; color: string };
+  project: { id: string; name: string; color: string } | null;
   assignee: UserSummary | null;
   labels: TaskLabel[];
   commentCount: number;
@@ -197,6 +217,7 @@ export type TaskComment = {
 export type TasksSnapshot = {
   workspace: WorkspaceSummary;
   me: UserSummary;
+  teams: TaskTeam[];
   projects: TaskProject[];
   labels: TaskLabel[];
   statuses: TaskStatus[];
@@ -209,10 +230,67 @@ export type TasksSnapshot = {
   };
 };
 
+export type IssueEventKind =
+  | 'created'
+  | 'title'
+  | 'status'
+  | 'priority'
+  | 'assignee'
+  | 'labels'
+  | 'project'
+  | 'parent'
+  | 'start_date'
+  | 'due_date'
+  | 'mentioned';
+
+/** One line of an issue's history. Values are already display text ("In Progress", "Amina Diallo"). */
+export type TaskEvent = {
+  id: string;
+  kind: IssueEventKind;
+  actor: UserSummary | null;
+  from: string | null;
+  to: string | null;
+  createdAt: string;
+};
+
 export type TaskIssueDetail = {
   issue: TaskIssue;
   comments: TaskComment[];
+  events: TaskEvent[];
   parent: TaskIssue | null;
   subIssues: TaskIssue[];
   editors: UserSummary[];
+  createdBy: UserSummary | null;
+  /** Teammates writing a comment right now. Includes the viewer; filter on the client. */
+  commentTyping: UserSummary[];
+};
+
+/** A compact view of an issue for #KOR-12 references and embeds in chat. */
+export type IssueRef = {
+  id: string;
+  key: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee: UserSummary | null;
+};
+
+export type NotificationKind =
+  | 'issue_assigned'
+  | 'issue_status'
+  | 'issue_comment'
+  | 'issue_mentioned'
+  | 'message_mention'
+  | 'thread_reply';
+
+export type InboxItem = {
+  id: string;
+  kind: NotificationKind;
+  actor: UserSummary | null;
+  body: string;
+  readAt: string | null;
+  createdAt: string;
+  issue: IssueRef | null;
+  channel: { id: string; name: string; kind: string } | null;
+  messageId: string | null;
 };

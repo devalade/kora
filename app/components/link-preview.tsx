@@ -81,7 +81,7 @@ function PreviewCard({ url }: { url: string }) {
       href={preview.url}
       target="_blank"
       rel="noreferrer noopener"
-      className="group flex min-h-[92px] w-full max-w-[540px] overflow-hidden rounded-xl border border-line bg-paper transition-[border-color,box-shadow] duration-150 ease-out hover:border-ink/20 hover:shadow-[0_10px_24px_-20px_oklch(0_0_0_/_0.45)]"
+      className="group/card flex min-h-[92px] w-full max-w-[540px] overflow-hidden rounded-xl border border-line bg-paper transition-[border-color,box-shadow] duration-150 ease-out hover:border-ink/25 hover:shadow-[0_1px_2px_oklch(0_0_0_/_0.04),0_10px_24px_-18px_oklch(0_0_0_/_0.35)]"
     >
       <span className="flex min-w-0 flex-1 flex-col justify-center gap-1 px-3.5 py-3">
         <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.09em] text-faint uppercase">
@@ -89,7 +89,7 @@ function PreviewCard({ url }: { url: string }) {
           <span className="truncate">{preview.siteName || preview.domain}</span>
         </span>
         {preview.title && (
-          <span className="line-clamp-2 text-[13px] leading-5 font-semibold text-ink transition-colors duration-100 group-hover:text-coral-deep">
+          <span className="line-clamp-2 text-[13px] leading-5 font-semibold text-ink underline decoration-transparent underline-offset-2 transition-[text-decoration-color] duration-150 group-hover/card:decoration-ink/30">
             {preview.title}
           </span>
         )}
