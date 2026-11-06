@@ -336,18 +336,37 @@ export function TypingRow({
 }) {
   const names = people.map((person) => person.name.split(' ')[0]);
   return (
-    <div className={cn('flex items-center gap-2 text-xs text-muted', className)} aria-live="polite">
-      <span className="flex items-end gap-0.5">
-        <span className="typing-dot size-1.5 rounded-full bg-faint" />
-        <span className="typing-dot size-1.5 rounded-full bg-faint" />
-        <span className="typing-dot size-1.5 rounded-full bg-faint" />
+    <div className={cn('flex items-center gap-2 text-[13px] text-ink-soft', className)} aria-live="polite">
+      <span className="flex -space-x-1.5">
+        {people.slice(0, 3).map((person) => (
+          <Avatar
+            key={person.id}
+            name={person.name}
+            src={person.avatarUrl}
+            color={person.avatarColor}
+            size="2xs"
+            className="ring-2 ring-paper"
+          />
+        ))}
       </span>
       <span>
-        {names.length === 1
-          ? `${names[0]} is typing`
-          : names.length === 2
-            ? `${names[0]} and ${names[1]} are typing`
-            : 'Several people are typing'}
+        {names.length === 1 ? (
+          <>
+            <span className="font-semibold text-ink">{names[0]}</span> is typing
+          </>
+        ) : names.length === 2 ? (
+          <>
+            <span className="font-semibold text-ink">{names[0]}</span> and{' '}
+            <span className="font-semibold text-ink">{names[1]}</span> are typing
+          </>
+        ) : (
+          'Several people are typing'
+        )}
+      </span>
+      <span className="flex items-end gap-0.5 pb-0.5">
+        <span className="typing-dot size-1.5 rounded-full bg-muted" />
+        <span className="typing-dot size-1.5 rounded-full bg-muted" />
+        <span className="typing-dot size-1.5 rounded-full bg-muted" />
       </span>
     </div>
   );

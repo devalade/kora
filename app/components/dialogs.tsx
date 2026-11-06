@@ -572,11 +572,14 @@ export function ProfileDialog({
   onClose,
   me,
   onSaved,
+  onOpenAgents,
 }: {
   open: boolean;
   onClose: () => void;
   me: UserSummary;
   onSaved: () => void;
+  /** Opens the AI agents (MCP tokens) dialog in place of this one. */
+  onOpenAgents?: () => void;
 }) {
   const [name, setName] = useState(me.name);
   const [title, setTitle] = useState(me.title);
@@ -680,6 +683,21 @@ export function ProfileDialog({
             Save profile
           </button>
         </div>
+        {onOpenAgents && (
+          <div className="flex items-center gap-3 border-t border-line pt-4">
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-ink">AI agents</span>
+              <span className="block text-xs text-muted">Connect Claude Code to your issues with MCP.</span>
+            </span>
+            <button
+              type="button"
+              onClick={onOpenAgents}
+              className="h-9 shrink-0 rounded-xl border border-line px-3 text-sm font-medium text-ink-soft hover:bg-line-soft"
+            >
+              Manage tokens
+            </button>
+          </div>
+        )}
         <div className="border-t border-line pt-4">
           <button
             type="button"

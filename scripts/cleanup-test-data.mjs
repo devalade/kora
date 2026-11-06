@@ -29,6 +29,7 @@ const TEST_EMAILS = ['first-run-%', 'stranger-%', 'dbg-%', 'auth-security-%', 't
 const TEST_TITLES = [
   'Owner issue %', 'Member issue %', 'Smoke test issue', 'Smoke test child', 'History issue %',
   'First issue in a new workspace', 'Second issue', 'Cap filler %', 'Cap needle %', 'Realtime issue %', 'Date picker check %',
+  'Typing test issue %', 'Comment test issue %', 'GitHub test issue %', 'MCP test issue %',
 ];
 const TEST_MESSAGES = ['Smoke test %', 'Thread reply %', 'Upload test %', 'Typing test %', 'Jump check %',
   'Bottom check %', 'VISUALCHECK%', 'Realtime check %', '@alade Realtime check %', 'Private realtime %'];
@@ -45,8 +46,10 @@ select 'issues removed', changes();
 delete from messages where ${list('body', TEST_MESSAGES)};
 select 'messages removed', changes();
 delete from issue_comments where body like 'Typing test %';
+delete from notifications where body like 'Typing test %' or body like 'Comment test %';
 select 'issue comments removed', changes();
 delete from projects where name like 'History test %';
+delete from api_tokens where name like 'MCP test %';
 delete from channels where kind = 'private' and name like 'rt-%';
 delete from login_attempts;
 select 'rate-limit rows removed', changes();

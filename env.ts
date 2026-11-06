@@ -10,4 +10,11 @@ export default defineEnv({
   // http://localhost:8787 in development) and the secret it shares with the app. See README, realtime.
   REALTIME_URL: string().optional(),
   REALTIME_SECRET: string().optional(),
+  // GitHub pull requests (README, GitHub). The GitHub App's URL slug (github.com/apps/<slug>), its
+  // OAuth client id and secret (to check that the person installing can see the installation), and
+  // the webhook secret GitHub signs deliveries with. All four, or GitHub stays off.
+  GITHUB_APP_SLUG: string().optional(),
+  GITHUB_CLIENT_ID: string().optional(),
+  GITHUB_CLIENT_SECRET: string().optional(),
+  GITHUB_WEBHOOK_SECRET: string().optional(),
 });

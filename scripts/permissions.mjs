@@ -102,8 +102,8 @@ const memberSeesWorkflow = await amina.getByRole('button', { name: 'Manage statu
 // 4. Description conflict: Alade saves first; Amina's save, based on the old text, conflicts.
 await alade.goto(`${base}/app/kora-studio/tasks/${aladeKey}`, { waitUntil: 'networkidle' });
 await amina.goto(`${base}/app/kora-studio/tasks/${aladeKey}`, { waitUntil: 'networkidle' });
-await alade.locator('.tiptap').click();
-await amina.locator('.tiptap').click();
+await alade.getByLabel('Issue description').click();
+await amina.getByLabel('Issue description').click();
 await alade.keyboard.type('Owner text');
 await alade.locator('body').click({ position: { x: 5, y: 400 } });
 await alade.waitForTimeout(1500);

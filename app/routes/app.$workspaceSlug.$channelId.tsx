@@ -1,3 +1,4 @@
+import { AgentAccessDialog } from '../components/agent-access-dialog';
 import { createFileRoute, redirect, useNavigate, useRouter } from '@tanstack/react-router';
 import {
   Hash,
@@ -117,6 +118,7 @@ function WorkspacePage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -632,7 +634,12 @@ function WorkspacePage() {
         onClose={() => setProfileOpen(false)}
         me={snapshot.me}
         onSaved={() => void load()}
+        onOpenAgents={() => {
+          setProfileOpen(false);
+          setAgentsOpen(true);
+        }}
       />
+      <AgentAccessDialog open={agentsOpen} onClose={() => setAgentsOpen(false)} />
       <ChannelDetailsDialog
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}

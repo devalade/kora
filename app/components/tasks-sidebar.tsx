@@ -10,16 +10,20 @@ import {
   Settings2,
   Tag,
   Trash2,
+  GitBranch,
   UserRound,
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import type { TasksSnapshot } from '../lib/types';
 import type { TasksSearch, TasksView } from '../lib/tasks-search';
 import { cn } from '../utils/cn';
 import { openNewIssue } from '../lib/new-issue-store';
 import { AppRail } from './app-rail';
 import { LabelManagerDialog } from './label-manager-dialog';
+import { GithubDialog } from './github-dialog';
+import { GITHUB_ENABLED } from '../lib/features';
 import { TeamDialog } from './team-dialog';
 import { StatusManagerDialog } from './status-manager-dialog';
 import { ProjectIcon } from './issue-fields';
@@ -53,6 +57,7 @@ export function TasksSidebar({
 }) {
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [labelManagerOpen, setLabelManagerOpen] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(Boolean(activeLabel));
@@ -69,6 +74,28 @@ export function TasksSidebar({
   const hiddenForA11y = !mobileOpen && !desktop;
   // Workflow and teams change things for everyone, so only admins see those controls.
   const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
+
+  // GitHub's install flow returns to /tasks?github=<result>: say how it went, then tidy the URL.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get('github');
+    if (!result || !GITHUB_ENABLED) return;
+    url.searchParams.delete('github');
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+    const messages: Record<string, string> = {
+      'not-admin': 'Only workspace admins can connect GitHub.',
+      'not-yours': 'GitHub did not confirm that you can see that installation, so it was not connected.',
+      'in-use': 'That GitHub installation is already connected to another workspace.',
+      expired: 'The GitHub connection took too long. Try again.',
+      cancelled: 'GitHub was not connected.',
+    };
+    if (result === 'connected') {
+      toast.success('GitHub connected', { description: 'Pull requests that mention an issue key now link here.' });
+      setGithubOpen(true);
+    } else {
+      toast.error(messages[result] ?? 'GitHub was not connected.');
+    }
+  }, []);
 
   return (
     <>
@@ -312,6 +339,17 @@ export function TasksSidebar({
             >
               <Tag size={13} /> Labels
             </button>
+            {GITHUB_ENABLED && (
+              <button
+                type="button"
+                onClick={() => setGithubOpen(true)}
+                aria-label="GitHub settings"
+                title="GitHub"
+                className="grid size-8 shrink-0 place-items-center rounded-md text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+              >
+                <GitBranch size={14} />
+              </button>
+            )}
             <Link
               to="/app/$workspaceSlug/tasks/trash"
               params={{ workspaceSlug: snapshot.workspace.slug }}
@@ -334,6 +372,7 @@ export function TasksSidebar({
         onClose={() => setStatusManagerOpen(false)}
         snapshot={snapshot}
       />
+      {GITHUB_ENABLED && <GithubDialog open={githubOpen} onClose={() => setGithubOpen(false)} snapshot={snapshot} />}
       <LabelManagerDialog
         open={labelManagerOpen}
         onClose={() => setLabelManagerOpen(false)}

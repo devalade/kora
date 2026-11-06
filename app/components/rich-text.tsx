@@ -272,6 +272,30 @@ function renderBlocks(body: string, context: InlineContext) {
         items.push(lines[index].replace(/^\s*[-*+]\s+/, ''));
         index += 1;
       }
+      // "- [ ] item" and "- [x] item" are checklist items, as the task editor writes them.
+      const checks = items.map((item) => item.match(/^\[( |x|X)\]\s+(.*)$/));
+      if (checks.every(Boolean)) {
+        blocks.push(
+          <ul key={`block-${key++}`} className="space-y-0.5">
+            {checks.map((check, itemIndex) => (
+              <li key={`li-${itemIndex}`} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={check![1] !== ' '}
+                  readOnly
+                  disabled
+                  aria-label={check![2]}
+                  className="mt-[5px] size-3.5 shrink-0 accent-ink"
+                />
+                <span className={cn(check![1] !== ' ' && 'text-muted line-through')}>
+                  {renderInline(check![2], context, `cl-${key}-${itemIndex}`)}
+                </span>
+              </li>
+            ))}
+          </ul>,
+        );
+        continue;
+      }
       blocks.push(
         <ul key={`block-${key++}`} className="list-disc space-y-0.5 pl-5">
           {items.map((item, itemIndex) => (

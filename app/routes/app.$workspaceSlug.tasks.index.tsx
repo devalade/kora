@@ -49,6 +49,8 @@ import { TasksSidebar } from '../components/tasks-sidebar';
 import { NewIssueModal } from '../components/new-issue';
 import { openNewIssue } from '../lib/new-issue-store';
 import { cn } from '../utils/cn';
+import { PullRequestBadge } from '../components/pull-request';
+import { GITHUB_ENABLED } from '../lib/features';
 
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
@@ -1030,6 +1032,7 @@ function IssueList({
                   className="hidden text-[11px] sm:flex"
                 />
                 <SubIssueBadge issue={issue} className="hidden text-[11px] sm:flex" />
+                {GITHUB_ENABLED && issue.pullRequest && <PullRequestBadge pullRequest={issue.pullRequest} />}
                 <span className="hidden w-12 text-right text-[11px] text-faint sm:block">
                   {relativeTime(issue.updatedAt)}
                 </span>
@@ -1553,6 +1556,7 @@ function BoardView({
                     <span className="ml-auto flex shrink-0 items-center gap-2">
                       <ChecklistBadge description={issue.description} className="text-[11px]" />
                       <SubIssueBadge issue={issue} className="text-[11px]" />
+                      {GITHUB_ENABLED && issue.pullRequest && <PullRequestBadge pullRequest={issue.pullRequest} />}
                       {issue.assignee ? (
                         <Avatar
                           name={issue.assignee.name} src={issue.assignee.avatarUrl}

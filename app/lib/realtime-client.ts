@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RealtimeEvent } from './realtime-protocol';
 import { getRealtimeTicketFn } from './realtime-ticket';
 
@@ -258,4 +258,70 @@ export function useLiveRefresh(
       document.removeEventListener('visibilitychange', onShow);
     };
   }, [slug]);
+}
+
+/** A typing report lasts this long unless it is refreshed (composers resend every 2 s while typing). */
+const TYPING_TTL_MS = 6_000;
+
+/**
+ * Who is typing a channel message, per channel, built from typing events alone (no fetch). Thread
+ * replies and the signed-in person are left out. The timers only expire local UI state.
+ */
+export function useChannelTyping(slug: string, meId: string) {
+  const [typing, setTyping] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
+  const expiries = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const timers = expiries.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
+
+  useRealtime(slug, (event) => {
+    if (event.t === 'sync') {
+      for (const timer of expiries.current.values()) clearTimeout(timer);
+      expiries.current.clear();
+      setTyping(new Map());
+      return;
+    }
+    const stop = (channelId: string, userId: string) => {
+      const id = `${channelId}:${userId}`;
+      const timer = expiries.current.get(id);
+      if (!timer) return;
+      clearTimeout(timer);
+      expiries.current.delete(id);
+      setTyping((current) => {
+        const people = current.get(channelId)?.filter((person) => person !== userId) ?? [];
+        const next = new Map(current);
+        if (people.length) next.set(channelId, people);
+        else next.delete(channelId);
+        return next;
+      });
+    };
+    if (event.t === 'chat' && event.u) {
+      stop(event.c, event.u);
+      return;
+    }
+    if (event.t !== 'typing' || !event.u || event.u === meId) return;
+    const { c: channelId, u: userId } = event;
+    if (!event.on || event.m) {
+      stop(channelId, userId);
+      return;
+    }
+    const id = `${channelId}:${userId}`;
+    clearTimeout(expiries.current.get(id));
+    expiries.current.set(
+      id,
+      setTimeout(() => stop(channelId, userId), TYPING_TTL_MS),
+    );
+    setTyping((current) => {
+      const people = current.get(channelId) ?? [];
+      if (people.includes(userId)) return current;
+      return new Map(current).set(channelId, [...people, userId]);
+    });
+  });
+
+  return typing;
 }

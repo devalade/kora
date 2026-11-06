@@ -16,6 +16,7 @@ import { Avatar } from './avatar';
 import { AppRail } from './app-rail';
 import { cn } from '../utils/cn';
 import { MembersDialog } from './members-dialog';
+import { useChannelTyping } from '../lib/realtime-client';
 
 export function WorkspaceSidebar({
   snapshot,
@@ -44,6 +45,11 @@ export function WorkspaceSidebar({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const typing = useChannelTyping(snapshot.workspace.slug, snapshot.me.id);
+  const typingNames = (channelId: string) => {
+    const ids = typing.get(channelId) ?? [];
+    return ids.map((id) => snapshot.members.find((member) => member.id === id)?.name.split(' ')[0] ?? 'Someone');
+  };
 
   return (
     <>
@@ -196,6 +202,9 @@ export function WorkspaceSidebar({
                   )}
                   <Hash size={14} className="shrink-0 opacity-70" />
                   <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+                  {channel.id !== activeChannelId && typingNames(channel.id).length > 0 && (
+                    <SidebarTyping names={typingNames(channel.id)} />
+                  )}
                   {channel.mentions > 0 && channel.id !== activeChannelId && (
                     <span
                       className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink"
@@ -255,7 +264,15 @@ export function WorkspaceSidebar({
                     online={dm.peer?.online}
                     className="[--avatar-ring:#1d2523]"
                   />
-                  <span className="min-w-0 flex-1 truncate">{dm.peer?.name ?? 'Direct message'}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {dm.peer?.name ?? 'Direct message'}
+                    {dm.id !== activeChannelId && typingNames(dm.id).length > 0 && (
+                      <span className="ml-1.5 font-normal text-sidebar-text">typing…</span>
+                    )}
+                  </span>
+                  {dm.id !== activeChannelId && typingNames(dm.id).length > 0 && (
+                    <SidebarTyping names={typingNames(dm.id)} />
+                  )}
                   {dm.mentions > 0 && dm.id !== activeChannelId && (
                     <span
                       className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-gold px-1 text-[9px] font-bold text-ink"
@@ -318,6 +335,19 @@ export function WorkspaceSidebar({
         workspaceId={snapshot.workspace.id}
       />
     </>
+  );
+}
+
+/** Three dots on a sidebar row while someone types there; the names are for screen readers. */
+function SidebarTyping({ names }: { names: string[] }) {
+  const label =
+    names.length === 1 ? `${names[0]} is typing` : names.length === 2 ? `${names[0]} and ${names[1]} are typing` : 'Several people are typing';
+  return (
+    <span className="flex shrink-0 items-end gap-0.5 pr-0.5" role="status" aria-label={label} title={label}>
+      <span className="typing-dot size-1 rounded-full bg-white/80" />
+      <span className="typing-dot size-1 rounded-full bg-white/80" />
+      <span className="typing-dot size-1 rounded-full bg-white/80" />
+    </span>
   );
 }
 

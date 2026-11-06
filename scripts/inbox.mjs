@@ -36,8 +36,8 @@ const now = Date.now();
 const iso = (offset) => new Date(now - offset).toISOString();
 sql(
   `insert into notifications (id, workspace_id, user_id, actor_id, kind, issue_id, channel_id, message_id, body, read_at, created_at) values
-  ('${ids[0]}', '${workspaceId}', 'u-alade', 'u-amina', 'issue_assigned', 'i-4', null, null, 'Please take this one before Friday.', null, '${iso(60_000)}'),
-  ('${ids[1]}', '${workspaceId}', 'u-alade', 'u-amina', 'message_mention', null, 'ch-design', null, 'Can you look at the new icon set?', null, '${iso(120_000)}')`,
+  ('${ids[0]}', '${workspaceId}', 'u-alade', 'u-amina', 'issue_assigned', 'i-4', null, null, 'Please take this one before Friday.', null, '${iso(2_000)}'),
+  ('${ids[1]}', '${workspaceId}', 'u-alade', 'u-amina', 'message_mention', null, 'ch-design', null, 'Can you look at the new icon set?', null, '${iso(4_000)}')`,
 );
 
 const browser = await chromium.launch();
@@ -72,13 +72,13 @@ try {
   await rail.getByRole('link', { name: /Inbox/ }).click();
   await page.waitForURL('**/inbox');
   const list = page.getByRole('region', { name: 'Notifications' });
-  await list.getByText('Amina assigned you KOR-4').waitFor({ timeout: 15000 });
+  await list.getByText('Amina assigned you KOR-4', { exact: true }).waitFor({ timeout: 15000 });
   await list.getByText('Amina mentioned you in #design').waitFor();
   check('both items are listed', true);
   check('badge unchanged before selecting', (await badge.innerText()) === String(baseline + 2));
   if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/inbox-before.png` });
 
-  await list.getByText('Amina assigned you KOR-4').click();
+  await list.getByText('Amina assigned you KOR-4', { exact: true }).click();
   await page.getByRole('link', { name: 'Open issue' }).waitFor();
   await page.waitForFunction((n) => document.querySelector('[data-testid="inbox-badge"]')?.textContent === String(n), baseline + 1, { timeout: 5000 });
   check('selecting an item marks it read and the badge drops to 1', true);
@@ -107,7 +107,7 @@ try {
     .getByRole('group', { name: 'Filter' })
     .getByRole('button', { name: 'All', exact: true })
     .click();
-  await list.getByText('Amina assigned you KOR-4').click();
+  await list.getByText('Amina assigned you KOR-4', { exact: true }).click();
   await page.getByRole('link', { name: 'Open issue' }).click();
   await page.waitForURL('**/tasks/KOR-4', { timeout: 15000 });
   check('Open issue goes to the issue page', page.url().endsWith('/tasks/KOR-4'));

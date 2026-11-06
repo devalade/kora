@@ -15,11 +15,14 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as ApiAvatarRouteImport } from './routes/api.avatar'
 import { Route as ApiLinkPreviewRouteImport } from './routes/api.link-preview'
 import { Route as ApiLinkPreviewImageRouteImport } from './routes/api.link-preview-image'
+import { Route as ApiMcpRouteImport } from './routes/api.mcp'
 import { Route as ApiUploadRouteImport } from './routes/api.upload'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as JoinCodeRouteImport } from './routes/join.$code'
 import { Route as ApiAvatarsUserIdRouteImport } from './routes/api.avatars.$userId'
 import { Route as ApiFilesIdRouteImport } from './routes/api.files.$id'
+import { Route as ApiGithubSetupRouteImport } from './routes/api.github.setup'
+import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhook'
 import { Route as ApiRealtimePresenceRouteImport } from './routes/api.realtime.presence'
 import { Route as AppWorkspaceSlugIndexRouteImport } from './routes/app.$workspaceSlug.index'
 import { Route as AppWorkspaceSlugChannelIdRouteImport } from './routes/app.$workspaceSlug.$channelId'
@@ -62,6 +65,11 @@ const ApiLinkPreviewImageRoute = ApiLinkPreviewImageRouteImport.update({
   path: '/api/link-preview-image',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMcpRoute = ApiMcpRouteImport.update({
+  id: '/api/mcp',
+  path: '/api/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiUploadRoute = ApiUploadRouteImport.update({
   id: '/api/upload',
   path: '/api/upload',
@@ -85,6 +93,16 @@ const ApiAvatarsUserIdRoute = ApiAvatarsUserIdRouteImport.update({
 const ApiFilesIdRoute = ApiFilesIdRouteImport.update({
   id: '/api/files/$id',
   path: '/api/files/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubSetupRoute = ApiGithubSetupRouteImport.update({
+  id: '/api/github/setup',
+  path: '/api/github/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubWebhookRoute = ApiGithubWebhookRouteImport.update({
+  id: '/api/github/webhook',
+  path: '/api/github/webhook',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiRealtimePresenceRoute = ApiRealtimePresenceRouteImport.update({
@@ -156,11 +174,14 @@ export interface FileRoutesByFullPath {
   '/api/avatar': typeof ApiAvatarRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/link-preview-image': typeof ApiLinkPreviewImageRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app/': typeof AppIndexRoute
   '/api/avatars/$userId': typeof ApiAvatarsUserIdRoute
   '/api/files/$id': typeof ApiFilesIdRoute
+  '/api/github/setup': typeof ApiGithubSetupRoute
+  '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/realtime/presence': typeof ApiRealtimePresenceRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
   '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
@@ -180,11 +201,14 @@ export interface FileRoutesByTo {
   '/api/avatar': typeof ApiAvatarRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/link-preview-image': typeof ApiLinkPreviewImageRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app': typeof AppIndexRoute
   '/api/avatars/$userId': typeof ApiAvatarsUserIdRoute
   '/api/files/$id': typeof ApiFilesIdRoute
+  '/api/github/setup': typeof ApiGithubSetupRoute
+  '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/realtime/presence': typeof ApiRealtimePresenceRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
   '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
@@ -204,11 +228,14 @@ export interface FileRoutesById {
   '/api/avatar': typeof ApiAvatarRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/link-preview-image': typeof ApiLinkPreviewImageRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app/': typeof AppIndexRoute
   '/api/avatars/$userId': typeof ApiAvatarsUserIdRoute
   '/api/files/$id': typeof ApiFilesIdRoute
+  '/api/github/setup': typeof ApiGithubSetupRoute
+  '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/realtime/presence': typeof ApiRealtimePresenceRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
   '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
@@ -230,11 +257,14 @@ export interface FileRouteTypes {
     | '/api/avatar'
     | '/api/link-preview'
     | '/api/link-preview-image'
+    | '/api/mcp'
     | '/api/upload'
     | '/join/$code'
     | '/app/'
     | '/api/avatars/$userId'
     | '/api/files/$id'
+    | '/api/github/setup'
+    | '/api/github/webhook'
     | '/api/realtime/presence'
     | '/app/$workspaceSlug/$channelId'
     | '/app/$workspaceSlug/inbox'
@@ -254,11 +284,14 @@ export interface FileRouteTypes {
     | '/api/avatar'
     | '/api/link-preview'
     | '/api/link-preview-image'
+    | '/api/mcp'
     | '/api/upload'
     | '/join/$code'
     | '/app'
     | '/api/avatars/$userId'
     | '/api/files/$id'
+    | '/api/github/setup'
+    | '/api/github/webhook'
     | '/api/realtime/presence'
     | '/app/$workspaceSlug/$channelId'
     | '/app/$workspaceSlug/inbox'
@@ -277,11 +310,14 @@ export interface FileRouteTypes {
     | '/api/avatar'
     | '/api/link-preview'
     | '/api/link-preview-image'
+    | '/api/mcp'
     | '/api/upload'
     | '/join/$code'
     | '/app/'
     | '/api/avatars/$userId'
     | '/api/files/$id'
+    | '/api/github/setup'
+    | '/api/github/webhook'
     | '/api/realtime/presence'
     | '/app/$workspaceSlug/$channelId'
     | '/app/$workspaceSlug/inbox'
@@ -302,11 +338,14 @@ export interface RootRouteChildren {
   ApiAvatarRoute: typeof ApiAvatarRoute
   ApiLinkPreviewRoute: typeof ApiLinkPreviewRoute
   ApiLinkPreviewImageRoute: typeof ApiLinkPreviewImageRoute
+  ApiMcpRoute: typeof ApiMcpRoute
   ApiUploadRoute: typeof ApiUploadRoute
   JoinCodeRoute: typeof JoinCodeRoute
   AppIndexRoute: typeof AppIndexRoute
   ApiAvatarsUserIdRoute: typeof ApiAvatarsUserIdRoute
   ApiFilesIdRoute: typeof ApiFilesIdRoute
+  ApiGithubSetupRoute: typeof ApiGithubSetupRoute
+  ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
   ApiRealtimePresenceRoute: typeof ApiRealtimePresenceRoute
   AppWorkspaceSlugChannelIdRoute: typeof AppWorkspaceSlugChannelIdRoute
   AppWorkspaceSlugInboxRoute: typeof AppWorkspaceSlugInboxRoute
@@ -359,6 +398,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiLinkPreviewImageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mcp': {
+      id: '/api/mcp'
+      path: '/api/mcp'
+      fullPath: '/api/mcp'
+      preLoaderRoute: typeof ApiMcpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/upload': {
       id: '/api/upload'
       path: '/api/upload'
@@ -392,6 +438,20 @@ declare module '@tanstack/react-router' {
       path: '/api/files/$id'
       fullPath: '/api/files/$id'
       preLoaderRoute: typeof ApiFilesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/setup': {
+      id: '/api/github/setup'
+      path: '/api/github/setup'
+      fullPath: '/api/github/setup'
+      preLoaderRoute: typeof ApiGithubSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/webhook': {
+      id: '/api/github/webhook'
+      path: '/api/github/webhook'
+      fullPath: '/api/github/webhook'
+      preLoaderRoute: typeof ApiGithubWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/realtime/presence': {
@@ -502,11 +562,14 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAvatarRoute: ApiAvatarRoute,
   ApiLinkPreviewRoute: ApiLinkPreviewRoute,
   ApiLinkPreviewImageRoute: ApiLinkPreviewImageRoute,
+  ApiMcpRoute: ApiMcpRoute,
   ApiUploadRoute: ApiUploadRoute,
   JoinCodeRoute: JoinCodeRoute,
   AppIndexRoute: AppIndexRoute,
   ApiAvatarsUserIdRoute: ApiAvatarsUserIdRoute,
   ApiFilesIdRoute: ApiFilesIdRoute,
+  ApiGithubSetupRoute: ApiGithubSetupRoute,
+  ApiGithubWebhookRoute: ApiGithubWebhookRoute,
   ApiRealtimePresenceRoute: ApiRealtimePresenceRoute,
   AppWorkspaceSlugChannelIdRoute: AppWorkspaceSlugChannelIdRoute,
   AppWorkspaceSlugInboxRoute: AppWorkspaceSlugInboxRoute,

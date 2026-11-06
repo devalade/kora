@@ -1,0 +1,1 @@
+ALTER TABLE `issue_editors` ADD `typing_field` text;

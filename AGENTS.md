@@ -11,7 +11,10 @@ Kora is a Void + TanStack Start app on Cloudflare. Read `README.md` first.
 - `npx void db seed` resets the local database and loads the demo workspace.
 - `node scripts/smoke.mjs`, `node scripts/upload.mjs`, and `node scripts/call.mjs` verify the app at
   `http://localhost:5174`. `node scripts/realtime.mjs` checks push delivery, presence and the worker's guards, and
-  `node scripts/ssrf.mjs` checks the link-preview address rules.
+  `node scripts/ssrf.mjs` checks the link-preview address rules. `node scripts/github.mjs` (needs the
+  `GITHUB_*` values in `.env`; any values work locally, and it skips while `GITHUB_ENABLED` in
+  `app/lib/features.ts` is off) and `node scripts/mcp.mjs` check pull request
+  linking and the MCP server.
 - `npm run deploy` is the only way to ship: it checks migrations, migrates the remote database and
   deploys back to back. Never run writes with `void db execute --remote`.
 - `npm run check:migrations` must pass after any schema change. On D1 a table rebuild (`DROP TABLE`)
@@ -32,7 +35,7 @@ Kora is a Void + TanStack Start app on Cloudflare. Read `README.md` first.
 
 - Server functions live in `app/lib/*.ts` next to their domain. Only export `createServerFn`
   functions and types from files the client imports. Server-only helpers go in `session.ts`,
-  `server.ts`, or `attachments.ts`.
+  `server.ts`, `attachments.ts`, `github-server.ts`, or `mcp-tools.ts`.
 - Keep database access behind `requireUser`, `requireWorkspace`, and `requireChannel`.
 - Anything that changes things for everyone (workflow statuses, deleting labels, teams, deleting
   projects) goes through `requireAdmin`. Deleting an issue is allowed for its creator or an admin,
@@ -62,4 +65,6 @@ Kora is a Void + TanStack Start app on Cloudflare. Read `README.md` first.
 ## Product shape
 
 The app is a focused Slack alternative: channels, DMs, threads, reactions, files, search, presence,
-and huddles. Do not add bots, workflows, or integrations until the core room is solid.
+and huddles, with Linear-style tasks. The only integrations are GitHub pull requests on issues and
+the MCP server for agents (`/api/mcp`); do not add others (bots, chat workflows) until the core room
+is solid.

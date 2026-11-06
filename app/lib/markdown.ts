@@ -20,3 +20,16 @@ export function taskProgress(markdown: string): ChecklistProgress {
     done: lines.filter((item) => item.checked).length,
   };
 }
+
+/** Markdown reduced to one line of plain text, for inbox previews and other short quotes. */
+export function markdownToPlainText(markdown: string) {
+  return markdown
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^\s*(?:#{1,6}|>|[-*+]\s+\[[ xX]\]|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__|~~|`)(.+?)\1/g, '$2')
+    .replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?=[^\w*]|$)/g, '$1$2')
+    .replace(/\\([\\`*_{}[\]()#+\-.!>~|])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

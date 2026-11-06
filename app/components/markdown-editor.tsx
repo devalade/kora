@@ -1,5 +1,5 @@
 import { Bold, Code2, Italic, Link2, ListTodo, Loader2 } from 'lucide-react';
-import { EditorContent, useEditor } from '@tiptap/react';
+import { EditorContent, Extension, InputRule, useEditor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import { TaskList } from '@tiptap/extension-task-list';
@@ -10,6 +10,32 @@ import { useEffect, useRef } from 'react';
 import { taskProgress } from '../lib/markdown';
 import { cn } from '../utils/cn';
 
+/**
+ * Linear's "- [ ] " shortcut: "- " makes a bullet first, so typing "[ ] " or "[x] " at the start of
+ * a bullet turns that list into a checklist (TaskItem's own rule only fires on a plain line).
+ */
+const BulletToChecklist = Extension.create({
+  name: 'bulletToChecklist',
+  addInputRules() {
+    return [
+      new InputRule({
+        find: /^\[([ xX]?)\]\s$/,
+        handler: ({ state, range, match, chain }) => {
+          const { $from } = state.selection;
+          if ($from.depth < 2 || $from.node(-1).type.name !== 'listItem') return null;
+          if ($from.node(-2).type.name !== 'bulletList') return null;
+          const checked = match[1]?.toLowerCase() === 'x';
+          chain()
+            .deleteRange(range)
+            .toggleTaskList()
+            .updateAttributes('taskItem', { checked })
+            .run();
+        },
+      }),
+    ];
+  },
+});
+
 export function MarkdownEditor({
   value,
   onChange,
@@ -18,10 +44,16 @@ export function MarkdownEditor({
   ariaLabel = 'Description',
   variant = 'boxed',
   minHeight = 160,
+  onSubmit,
+  className,
 }: {
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
+  /** Cmd/Ctrl+Enter calls this (comment boxes); plain Enter keeps making new lines. */
+  onSubmit?: () => void;
+  /** Extra classes on the bare editor's wrapper (text size, padding). */
+  className?: string;
   placeholder?: string;
   ariaLabel?: string;
   /** 'bare' reads as plain text, like Linear: no frame, formatting in a menu over the selection. */
@@ -31,8 +63,10 @@ export function MarkdownEditor({
   const onChangeRef = useRef(onChange);
   const lastSyncedValue = useRef(value);
   const onBlurRef = useRef(onBlur);
+  const onSubmitRef = useRef(onSubmit);
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
+  onSubmitRef.current = onSubmit;
   const progress = taskProgress(value);
 
   const editor = useEditor({
@@ -45,6 +79,7 @@ export function MarkdownEditor({
       }),
       TaskList,
       TaskItem.configure({ nested: true }),
+      BulletToChecklist,
       Placeholder.configure({ placeholder }),
       Markdown.configure({ markedOptions: { gfm: true } }),
     ],
@@ -54,6 +89,12 @@ export function MarkdownEditor({
       attributes: {
         class: 'tiptap markdown-body',
         'aria-label': ariaLabel,
+      },
+      handleKeyDown: (_view, event) => {
+        if (!onSubmitRef.current || event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return false;
+        event.preventDefault();
+        onSubmitRef.current();
+        return true;
       },
     },
     onUpdate: ({ editor: current }) => {
@@ -133,7 +174,7 @@ export function MarkdownEditor({
 
   if (variant === 'bare') {
     return (
-      <div className="markdown-editor markdown-editor-bare">
+      <div className={cn('markdown-editor markdown-editor-bare', className)}>
         {editor ? (
           <>
             <BubbleMenu

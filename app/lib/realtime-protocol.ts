@@ -6,9 +6,16 @@
 //   'u:<user>'     one person, in every open tab
 
 export type RealtimeEvent =
-  /** A message, reply or reaction changed in a channel. `m` is the thread parent, when there is one. */
-  | { t: 'chat'; c: string; m?: string }
-  | { t: 'typing'; c: string }
+  /**
+   * A message, reply or reaction changed in a channel. `m` is the thread parent, when there is one;
+   * `u` is the author of a new message, so their typing dots clear at once.
+   */
+  | { t: 'chat'; c: string; m?: string; u?: string }
+  /**
+   * Someone (`u`) started or stopped (`on`) typing in a channel, or in a thread (`m`). Only the
+   * channel's members hear it, so naming the person is safe; the sidebar shows dots from it alone.
+   */
+  | { t: 'typing'; c: string; u?: string; on?: boolean; m?: string }
   /** A huddle started, ended, or someone joined, left, muted or shared. */
   | { t: 'call'; c: string }
   /** WebRTC signals are waiting for this person in a call. */

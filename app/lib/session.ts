@@ -1,6 +1,7 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { getCookie, setCookie, getRequestProtocol } from '@tanstack/react-start/server';
 import { and, db, eq, gt, inArray, lt } from 'void/db';
-import { sessions, users } from '@schema';
+import { apiTokens, sessions, users } from '@schema';
 import { newId } from './ids';
 import { avatarUrlFor } from './people';
 import type { UserSummary } from './types';
@@ -50,7 +51,53 @@ function writeSessionCookie(id: string) {
   });
 }
 
+// An MCP request acts as the owner of its API token: inside runAsUser, every server function sees
+// that person as the signed-in user, so permissions, history, inbox items and pushes all apply.
+const actingUser = new AsyncLocalStorage<UserSummary>();
+
+export function runAsUser<T>(user: UserSummary, work: () => Promise<T>) {
+  return actingUser.run(user, work);
+}
+
+export const API_TOKEN_PREFIX = 'kora_';
+
+export async function hashApiToken(token: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** The person a `Bearer kora_…` token belongs to, or null. Marks the token as used. */
+export async function userForApiToken(token: string): Promise<UserSummary | null> {
+  if (!token.startsWith(API_TOKEN_PREFIX) || token.length < 20 || token.length > 100) return null;
+  const tokenHash = await hashApiToken(token);
+  const [row] = await db
+    .select({
+      tokenId: apiTokens.id,
+      lastUsedAt: apiTokens.lastUsedAt,
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      avatarColor: users.avatarColor,
+      avatarKey: users.avatarKey,
+      title: users.title,
+      statusEmoji: users.statusEmoji,
+      statusText: users.statusText,
+      lastSeenAt: users.lastSeenAt,
+    })
+    .from(apiTokens)
+    .innerJoin(users, eq(users.id, apiTokens.userId))
+    .where(eq(apiTokens.tokenHash, tokenHash));
+  if (!row) return null;
+  // At most one write a minute per token.
+  if (!row.lastUsedAt || Date.now() - Date.parse(row.lastUsedAt) > 60_000) {
+    await db.update(apiTokens).set({ lastUsedAt: new Date().toISOString() }).where(eq(apiTokens.id, row.tokenId));
+  }
+  return toSessionUser(row);
+}
+
 export async function readSessionUser(): Promise<UserSummary | null> {
+  const acting = actingUser.getStore();
+  if (acting) return acting;
   const token = getCookie(SESSION_COOKIE);
   if (!token) return null;
   const rows = await db

@@ -401,6 +401,8 @@ export const issueEditors = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     updatedAt: text('updated_at').notNull().default(nowIso),
     typingAt: text('typing_at'),
+    // Where they are typing: 'comment' (also when null, for older rows) or 'description'.
+    typingField: text('typing_field'),
   },
   (table) => [
     primaryKey({ columns: [table.issueId, table.userId] }),
@@ -491,5 +493,87 @@ export const notifications = sqliteTable(
   (table) => [
     index('notifications_user_idx').on(table.userId, table.workspaceId, table.createdAt),
     index('notifications_unread_idx').on(table.userId, table.readAt),
+  ],
+);
+
+// GitHub: an installation of the Kora GitHub App on a GitHub account (user or org), connected to one
+// workspace by an admin. Webhooks arrive per installation; the id is GitHub's installation id.
+export const githubInstallations = sqliteTable(
+  'github_installations',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    accountLogin: text('account_login').notNull(),
+    accountType: text('account_type').notNull().default('Organization'),
+    connectedBy: text('connected_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [index('github_installations_workspace_idx').on(table.workspaceId)],
+);
+
+// Which status a linked issue moves to as its pull request moves. A null status means "don't move".
+export const githubSettings = sqliteTable('github_settings', {
+  workspaceId: text('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  openStatusId: text('open_status_id').references(() => taskStatuses.id, { onDelete: 'set null' }),
+  reviewStatusId: text('review_status_id').references(() => taskStatuses.id, { onDelete: 'set null' }),
+  mergeStatusId: text('merge_status_id').references(() => taskStatuses.id, { onDelete: 'set null' }),
+  updatedAt: text('updated_at').notNull().default(nowIso),
+});
+
+// A pull request linked to an issue, kept current by webhooks. One row per issue and PR.
+export const issueLinks = sqliteTable(
+  'issue_links',
+  {
+    id: text('id').primaryKey(),
+    issueId: text('issue_id')
+      .notNull()
+      .references(() => issues.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    repo: text('repo').notNull(),
+    number: integer('number').notNull(),
+    url: text('url').notNull(),
+    title: text('title').notNull(),
+    // 'draft' | 'open' | 'merged' | 'closed'
+    state: text('state').notNull(),
+    // 'approved' | 'changes_requested' | null
+    review: text('review'),
+    authorLogin: text('author_login').notNull().default(''),
+    branch: text('branch').notNull().default(''),
+    // Merging moves the issue only when the PR closes it (branch, title, or "Fixes KOR-12").
+    closes: integer('closes', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at').notNull().default(nowIso),
+    updatedAt: text('updated_at').notNull().default(nowIso),
+  },
+  (table) => [
+    uniqueIndex('issue_links_issue_pr_idx').on(table.issueId, table.repo, table.number),
+    index('issue_links_pr_idx').on(table.workspaceId, table.repo, table.number),
+  ],
+);
+
+// Personal access tokens for AI agents (the MCP server at /api/mcp). Only a SHA-256 hash is stored;
+// the token is shown once. A token acts as its owner, with exactly the owner's permissions.
+export const apiTokens = sqliteTable(
+  'api_tokens',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    // The first characters, so people can tell their tokens apart ("kora_3f9a…").
+    prefix: text('prefix').notNull(),
+    lastUsedAt: text('last_used_at'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [
+    uniqueIndex('api_tokens_hash_idx').on(table.tokenHash),
+    index('api_tokens_user_idx').on(table.userId),
   ],
 );

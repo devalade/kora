@@ -1,3 +1,4 @@
+import type { PullRequestState } from './github-links';
 export type UserSummary = {
   id: string;
   name: string;
@@ -210,6 +211,30 @@ export type TaskIssue = {
   createdAt: string;
   updatedAt: string;
   descriptionVersion: number;
+  /** The most advanced linked pull request (merged > open > draft > closed), for list and board rows. */
+  pullRequest: { state: PullRequestState; count: number } | null;
+};
+
+export type PullRequestLink = {
+  id: string;
+  repo: string;
+  number: number;
+  url: string;
+  title: string;
+  state: PullRequestState;
+  review: 'approved' | 'changes_requested' | null;
+  authorLogin: string;
+  branch: string;
+  updatedAt: string;
+};
+
+export type GithubSettings = {
+  /** False until the four GITHUB_* settings are configured on the server. */
+  configured: boolean;
+  installations: { id: string; accountLogin: string; accountType: string }[];
+  openStatusId: string | null;
+  reviewStatusId: string | null;
+  mergeStatusId: string | null;
 };
 
 export type TaskComment = {
@@ -250,7 +275,9 @@ export type IssueEventKind =
   | 'due_date'
   | 'mentioned'
   | 'deleted'
-  | 'restored';
+  | 'restored'
+  /** A pull request was linked (`to` is "#42 Title") or changed state (`from` → `to`: "open" → "merged"). */
+  | 'pull_request';
 
 /** One line of an issue's history. Values are already display text ("In Progress", "Amina Diallo"). */
 export type TaskEvent = {
@@ -272,6 +299,9 @@ export type TaskIssueDetail = {
   createdBy: UserSummary | null;
   /** Teammates writing a comment right now. Includes the viewer; filter on the client. */
   commentTyping: UserSummary[];
+  /** Teammates editing the description right now. Includes the viewer; filter on the client. */
+  descriptionEditing: UserSummary[];
+  pullRequests: PullRequestLink[];
 };
 
 /** A compact view of an issue for #KOR-12 references and embeds in chat. */
@@ -290,7 +320,9 @@ export type NotificationKind =
   | 'issue_comment'
   | 'issue_mentioned'
   | 'message_mention'
-  | 'thread_reply';
+  | 'thread_reply'
+  /** A linked pull request moved your issue, or was merged. The body is the PR line. */
+  | 'issue_pr';
 
 export type InboxItem = {
   id: string;

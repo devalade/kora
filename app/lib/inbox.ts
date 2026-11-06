@@ -36,6 +36,7 @@ const KINDS: NotificationKind[] = [
   'issue_mentioned',
   'message_mention',
   'thread_reply',
+  'issue_pr',
 ];
 const CATEGORIES: TaskStatusCategory[] = ['backlog', 'unstarted', 'started', 'completed', 'canceled'];
 const PRIORITIES: TaskPriority[] = [0, 1, 2, 3, 4];

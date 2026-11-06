@@ -5,6 +5,7 @@ import {
   issueEditors,
   issueEvents,
   issueLabels,
+  issueLinks,
   issues,
   labels,
   projects,
@@ -17,6 +18,7 @@ import {
 import { z } from 'zod';
 import { issueSubscribers, notify, recordIssueEvent } from './activity';
 import { newId } from './ids';
+import { markdownToPlainText } from './markdown';
 import { toUserSummary } from './people';
 import {
   inChunks,
@@ -48,7 +50,9 @@ import type {
   TaskStatus,
   TaskStatusCategory,
   TasksSnapshot,
+  PullRequestLink,
 } from './types';
+import type { PullRequestState } from './github-links';
 
 const PRIORITIES = [0, 1, 2, 3, 4] as const;
 const PRIORITY_NAMES = ['No priority', 'Urgent', 'High', 'Medium', 'Low'];
@@ -283,6 +287,7 @@ function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: numb
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     descriptionVersion: row.descriptionVersion,
+    pullRequest: null,
   };
 }
 
@@ -305,6 +310,29 @@ async function issueLabelsFor(issueIds: string[]) {
     const list = map.get(row.issueId) ?? [];
     list.push({ id: row.id, name: row.name, color: row.color });
     map.set(row.issueId, list);
+  }
+  return map;
+}
+
+const PR_RANK: Record<PullRequestState, number> = { closed: 0, draft: 1, open: 2, merged: 3 };
+
+/** Per issue: how many pull requests are linked, and the most advanced one's state. */
+async function pullRequestsFor(issueIds: string[]) {
+  const map = new Map<string, NonNullable<TaskIssue['pullRequest']>>();
+  if (issueIds.length === 0) return map;
+  const rows = await inChunks(issueIds, (chunk) =>
+    db
+      .select({ issueId: issueLinks.issueId, state: issueLinks.state })
+      .from(issueLinks)
+      .where(inArray(issueLinks.issueId, chunk)),
+  );
+  for (const row of rows) {
+    const state = row.state as PullRequestState;
+    const current = map.get(row.issueId);
+    map.set(row.issueId, {
+      count: (current?.count ?? 0) + 1,
+      state: current && PR_RANK[current.state] >= PR_RANK[state] ? current.state : state,
+    });
   }
   return map;
 }
@@ -557,6 +585,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
     editorRows,
     creatorRow,
     historyRows,
+    linkRows,
   ] = await Promise.all([
     issueLabelsFor([row.id]),
     commentCountsFor([row.id]),
@@ -610,6 +639,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
         statusText: users.statusText,
         lastSeenAt: users.lastSeenAt,
         typingAt: issueEditors.typingAt,
+        typingField: issueEditors.typingField,
       })
       .from(issueEditors)
       .innerJoin(users, eq(users.id, issueEditors.userId))
@@ -621,6 +651,12 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       ),
     creatorRows,
     eventRows,
+    db
+      .select()
+      .from(issueLinks)
+      .where(eq(issueLinks.issueId, row.id))
+      .orderBy(desc(issueLinks.updatedAt))
+      .limit(20),
   ]);
 
   const typingSince = new Date(Date.now() - COMMENT_TYPING_WINDOW_MS).toISOString();
@@ -629,9 +665,31 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
   );
   const subIssueDone = subIssues.filter((child) => child.status.category === 'completed').length;
   const parent = parentRow[0] ? toIssue(parentRow[0], [], 0) : null;
+  const pullRequests: PullRequestLink[] = linkRows.map((link) => ({
+    id: link.id,
+    repo: link.repo,
+    number: link.number,
+    url: link.url,
+    title: link.title,
+    state: link.state as PullRequestState,
+    review: link.review === 'approved' || link.review === 'changes_requested' ? link.review : null,
+    authorLogin: link.authorLogin,
+    branch: link.branch,
+    updatedAt: link.updatedAt,
+  }));
   return {
+    pullRequests,
     issue: {
       ...toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
+      pullRequest: pullRequests.length
+        ? {
+            count: pullRequests.length,
+            state: pullRequests.reduce<PullRequestState>(
+              (best, link) => (PR_RANK[link.state] > PR_RANK[best] ? link.state : best),
+              'closed',
+            ),
+          }
+        : null,
       subIssueCount: subIssues.length,
       subIssueDone,
     },
@@ -642,7 +700,16 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
     createdBy: creatorRow[0] ? toUserSummary(creatorRow[0]) : null,
     events: historyRows.map(toEvent),
     commentTyping: editorRows
-      .filter((editor) => editor.typingAt && editor.typingAt > typingSince)
+      .filter(
+        (editor) =>
+          editor.typingAt && editor.typingAt > typingSince && editor.typingField !== 'description',
+      )
+      .map((editor) => toUserSummary(editor)),
+    descriptionEditing: editorRows
+      .filter(
+        (editor) =>
+          editor.typingAt && editor.typingAt > typingSince && editor.typingField === 'description',
+      )
       .map((editor) => toUserSummary(editor)),
   };
 }
@@ -705,14 +772,16 @@ export const getTasksFn = createServerFn({ method: 'GET' })
         : await createDefaultTeam(workspace.id, workspace.name, me.id);
 
     const ids = issueRows.map((row) => row.id);
-    const [labelMap, commentMap] = await Promise.all([
+    const [labelMap, commentMap, prMap] = await Promise.all([
       issueLabelsFor(ids),
       commentCountsFor(ids),
+      pullRequestsFor(ids),
     ]);
 
-    const issueViews = issueRows.map((row) =>
-      toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
-    );
+    const issueViews = issueRows.map((row) => ({
+      ...toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
+      pullRequest: prMap.get(row.id) ?? null,
+    }));
     const subIssueCounts = new Map<string, { total: number; done: number }>();
     for (const issue of issueViews) {
       if (!issue.parentId) continue;
@@ -828,9 +897,10 @@ export const searchTasksFn = createServerFn({ method: 'GET' })
     if (rows.length === 0) return [];
 
     const ids = rows.map((row) => row.id);
-    const [labelMap, commentMap, children] = await Promise.all([
+    const [labelMap, commentMap, prMap, children] = await Promise.all([
       issueLabelsFor(ids),
       commentCountsFor(ids),
+      pullRequestsFor(ids),
       // Sub-issue progress, counted over live children only.
       inChunks(ids, (chunk) =>
         db
@@ -850,6 +920,7 @@ export const searchTasksFn = createServerFn({ method: 'GET' })
     }
     return rows.map((row) => ({
       ...toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
+      pullRequest: prMap.get(row.id) ?? null,
       subIssueCount: progress.get(row.id)?.total ?? 0,
       subIssueDone: progress.get(row.id)?.done ?? 0,
     }));
@@ -888,19 +959,26 @@ export const touchIssueEditorFn = createServerFn({ method: 'POST' })
   });
 
 export const setIssueTypingFn = createServerFn({ method: 'POST' })
-  .validator(z.object({ issueId: z.string(), active: z.boolean() }))
+  .validator(
+    z.object({
+      issueId: z.string(),
+      active: z.boolean(),
+      field: z.enum(['comment', 'description']).default('comment'),
+    }),
+  )
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const issue = await requireIssue(data.issueId, me.id);
     const now = new Date().toISOString();
     const typingAt = data.active ? now : null;
+    const typingField = data.active ? data.field : null;
     await db
       .insert(issueEditors)
-      .values({ issueId: data.issueId, userId: me.id, updatedAt: now, typingAt })
+      .values({ issueId: data.issueId, userId: me.id, updatedAt: now, typingAt, typingField })
       .onConflictDoUpdate({
         target: [issueEditors.issueId, issueEditors.userId],
-        set: { updatedAt: now, typingAt },
+        set: { updatedAt: now, typingAt, typingField },
       });
     await publish(issue.workspaceId, [toWorkspace({ t: 'editors', i: data.issueId })]);
     return { ok: true as const };
@@ -1298,7 +1376,7 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
       actorId: me.id,
       kind: 'issue_comment',
       issueId: data.issueId,
-      body: data.body,
+      body: markdownToPlainText(data.body),
     });
     // Posting ends the typing state right away instead of waiting for it to expire.
     await db

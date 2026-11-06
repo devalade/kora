@@ -62,6 +62,15 @@ huddles move between them.
 - Two people editing one description never overwrite each other: the later save is flagged as a
   conflict and the editor chooses which text to keep
 - Profile photos, cropped and resized in the browser, visible only to people who share a workspace
+- Typing dots on sidebar channels and DMs, avatars on the typing line, and "Amina is editing the
+  description" on an issue
+- Markdown comments that format as you type (headings, bold, code, lists, `- [ ]` checklists), posted
+  with ⌘↵ and shown formatted with issue chips
+- (Off for now) GitHub pull requests linked to issues by branch name, title or `Fixes KOR-12`, with PR state and
+  reviews on the issue, a PR badge in lists, and issues that move forward as the PR moves
+- "Copy git branch name" on every issue (⌘⇧.)
+- An MCP server for AI agents: personal tokens in Profile → AI agents, eight tools for reading,
+  creating, updating and commenting on issues, all recorded as the token's owner
 - Responsive app shell with a mobile navigation drawer
 
 ## Stack
@@ -201,6 +210,64 @@ Worker, `realtime/` (`kora-realtime`):
   client refetches. The only timers left are a 25 s keepalive ping (answered without waking the
   Durable Object) and two write heartbeats: huddle membership (20 s) and "viewing this issue" (20 s).
 
+### How GitHub works
+
+GitHub is switched off for now: `GITHUB_ENABLED` in `app/lib/features.ts` hides every GitHub
+control and makes the webhook and install routes answer 404. Set it to `true` to bring it back.
+
+Kora is a GitHub App. An admin opens Tasks → GitHub (the branch icon in the sidebar footer) and
+clicks Connect, which sends them to GitHub to install the app with a signed, 15-minute state. GitHub
+returns to `/api/github/setup`, which only connects the installation when the state matches the
+session, the person is a workspace admin, and GitHub confirms through that person's own OAuth token
+that they can see the installation. Nobody can attach someone else's installation to their
+workspace.
+
+Deliveries arrive at `/api/github/webhook`, signed with `GITHUB_WEBHOOK_SECRET`
+(`X-Hub-Signature-256`); anything unsigned or wrongly signed is refused before it is parsed.
+
+- **Linking** (`app/lib/github-links.ts`): a key in the branch (`alade/kor-12-search`) or the title
+  links in any case; in the description only upper-case keys link, and code is ignored. A closing word
+  (`Fixes`, `Closes`, `Resolves`, `Completes`) or a branch or title key means merging finishes the
+  issue; `Part of KOR-12` only links. Editing a key out unlinks it.
+- **Automation** (`app/lib/github-server.ts`, per workspace in the dialog): PR opened (drafts too) →
+  In Progress, review requested → In Review, merged → Done, each can be turned off. Issues only move
+  forward and never leave Done or Canceled.
+- Every link, state change and move writes a history line ("GitHub linked pull request …"),
+  publishes `issue`, and a merge that finishes an issue sends its assignee an inbox item.
+
+Set up the GitHub App once (github.com → Settings → Developer settings → GitHub Apps → New):
+
+| Field | Value |
+| --- | --- |
+| Callback URL | `https://kora.zecreator.com/api/github/setup` |
+| Request user authorization (OAuth) during installation | on |
+| Setup URL | leave empty (the callback handles it) |
+| Webhook URL | `https://kora.zecreator.com/api/github/webhook` |
+| Webhook secret | `openssl rand -hex 32` |
+| Repository permissions | Pull requests: read, Metadata: read |
+| Subscribe to events | Pull request, Pull request review |
+
+Then set `GITHUB_APP_SLUG` (the app's URL name), `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and
+`GITHUB_WEBHOOK_SECRET` (see Deploy). Locally any values work: `scripts/github.mjs` signs fake
+deliveries with your local secret.
+
+### MCP for AI agents
+
+`/api/mcp` is a Model Context Protocol server (Streamable HTTP, stateless, JSON responses). Create a
+token in Profile → AI agents; Kora shows it once and keeps only a SHA-256 hash. Then:
+
+```bash
+claude mcp add --transport http kora https://kora.zecreator.com/api/mcp \
+  --header "Authorization: Bearer kora_…"
+```
+
+Tools: `list_workspaces`, `workspace_info`, `list_my_issues`, `search_issues`, `get_issue` (with
+the git branch name and linked PRs), `create_issue`, `update_issue`, `add_comment`. Each call runs as
+the token's owner (`runAsUser` in `app/lib/session.ts`) through the same server functions as the app,
+so permissions, history lines, inbox items and live pushes all apply. An agent that starts KOR-12,
+works on its `gitBranch` and opens a PR closes the loop with the GitHub integration. Browser requests
+from another origin are refused; revoking a token stops it at once.
+
 ## Verification
 
 Playwright scripts cover the main paths. Start the dev server, then run:
@@ -212,7 +279,13 @@ node scripts/call.mjs     # two accounts join a huddle and exchange video
 node scripts/realtime.mjs # push delivery, no polling, presence, and the worker's ticket and secret checks
 node scripts/date-picker.mjs # the calendar picker: keyboard, Escape, quick picks, Clear, phone width
 node scripts/ssrf.mjs     # link-preview address rules (private ranges rejected, public hosts allowed)
+node scripts/typing.mjs   # typing in threads, comments, sidebar dots, and "editing the description"
+node scripts/comments.mjs # Markdown comments: live formatting, ⌘↵, formatted render, plain inbox text
+node scripts/github.mjs   # signed webhooks: linking, automation, reviews, merge, unlinking, guards
+node scripts/mcp.mjs      # MCP: token UI, handshake, every tool, live updates, errors, guards
 ```
+
+`scripts/github.mjs` needs the four `GITHUB_*` values in `.env` (any values work locally).
 
 They expect the app at `http://localhost:5174` and the realtime worker at `http://localhost:8787`
 (both started by `npm run dev`). Change the `base` constant if Vite picks another
@@ -237,6 +310,15 @@ openssl rand -base64 32                                          # the shared se
 npx wrangler secret put REALTIME_SECRET -c realtime/wrangler.jsonc
 npx void secret put REALTIME_SECRET
 npx void secret put REALTIME_URL                                 # https://realtime.kora.zecreator.com
+```
+
+To turn on GitHub, set the four values from the GitHub App (see How GitHub works):
+
+```bash
+npx void secret put GITHUB_APP_SLUG
+npx void secret put GITHUB_CLIENT_ID
+npx void secret put GITHUB_CLIENT_SECRET
+npx void secret put GITHUB_WEBHOOK_SECRET
 ```
 
 `npm run deploy` runs, in order, and stops at the first failure:

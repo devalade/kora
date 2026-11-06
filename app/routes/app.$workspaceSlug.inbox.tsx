@@ -50,8 +50,13 @@ export const Route = createFileRoute('/app/$workspaceSlug/inbox')({
   component: InboxPage,
 });
 
+/** GitHub items have no person behind them. */
+function actorName(item: InboxItem) {
+  return item.actor?.name ?? (item.kind === 'issue_pr' ? 'GitHub' : 'Someone');
+}
+
 function firstName(item: InboxItem) {
-  return item.actor?.name.split(/\s+/)[0] ?? 'Someone';
+  return actorName(item).split(/\s+/)[0] ?? 'Someone';
 }
 
 function whereLabel(item: InboxItem) {
@@ -78,6 +83,8 @@ function sentence(item: InboxItem) {
       return `${who} mentioned you in ${whereLabel(item)}`;
     case 'thread_reply':
       return `${who} replied to your thread in ${whereLabel(item)}`;
+    case 'issue_pr':
+      return `GitHub moved ${key} to ${item.issue?.status.name ?? 'a new status'}`;
   }
 }
 
@@ -389,7 +396,7 @@ function Row({
         aria-label={isUnread ? 'Unread' : undefined}
       />
       <Avatar
-        name={item.actor?.name ?? 'Someone'} src={item.actor?.avatarUrl}
+        name={actorName(item)} src={item.actor?.avatarUrl}
         color={item.actor?.avatarColor ?? '#736f66'}
         size="sm"
       />
@@ -538,13 +545,13 @@ function Detail({
         <div className="mx-auto w-full max-w-[640px]">
           <div className="flex items-center gap-3">
             <Avatar
-              name={item.actor?.name ?? 'Someone'} src={item.actor?.avatarUrl}
+              name={actorName(item)} src={item.actor?.avatarUrl}
               color={item.actor?.avatarColor ?? '#736f66'}
               size="md"
             />
             <div className="min-w-0">
               <p className="truncate text-[13px] font-semibold text-ink">
-                {item.actor?.name ?? 'Someone'}
+                {actorName(item)}
               </p>
               <p suppressHydrationWarning className="text-[12px] text-muted">
                 {fullDate(item.createdAt)}

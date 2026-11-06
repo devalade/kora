@@ -13,6 +13,8 @@ import {
   ChevronRight,
   CircleDashed,
   CircleDot,
+  GitBranch,
+  GitPullRequest,
   Hash,
   Link2,
   ListTree,
@@ -24,7 +26,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
 import {
@@ -45,6 +47,7 @@ import type {
   TaskLabel,
   TaskPriority,
   TasksSnapshot,
+  UserSummary,
 } from '../lib/types';
 import { relativeTime } from '../lib/format';
 import { openNewIssue } from '../lib/new-issue-store';
@@ -66,7 +69,11 @@ import { FloatingMenu } from '../components/floating';
 import { TaskPriorityIcon, TaskStatusIcon } from '../components/task-icons';
 import { TasksSidebar } from '../components/tasks-sidebar';
 import { TypingRow } from '../components/message-list';
-import { IssueChip } from '../components/issue-embed';
+import { IssueEmbeds } from '../components/issue-embed';
+import { RichText } from '../components/rich-text';
+import { PullRequestList } from '../components/pull-request';
+import { GITHUB_ENABLED } from '../lib/features';
+import { gitBranchName } from '../lib/github-links';
 import { cn } from '../utils/cn';
 
 export const Route = createFileRoute('/app/$workspaceSlug/tasks/$issueKey')({
@@ -112,6 +119,7 @@ function IssuePage() {
   const [comment, setComment] = useState('');
   const typingSentAt = useRef(0);
   const typingIdle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingFieldRef = useRef<'comment' | 'description'>('comment');
   const [sending, setSending] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -127,6 +135,9 @@ function IssuePage() {
     description: string;
     version: number;
   } | null>(null);
+  // A refresh must not replace the text while the person is choosing between theirs and the saved one.
+  const conflictRef = useRef(descriptionConflict);
+  conflictRef.current = descriptionConflict;
 
   const issue = detail.issue;
   latestIssueRef.current = issue;
@@ -166,7 +177,8 @@ function IssuePage() {
       });
       if (latestIssueRef.current?.id !== issue.id) return;
       const active = document.activeElement;
-      const editingDescription = Boolean(active?.closest('.tiptap'));
+      const editingDescription =
+        Boolean(active?.closest('[aria-label="Issue description"]')) || Boolean(conflictRef.current);
       const editingTitle =
         active instanceof HTMLInputElement && active.getAttribute('aria-label') === 'Issue title';
       setDetail((current) => ({
@@ -306,6 +318,7 @@ function IssuePage() {
 
   function handleDescriptionChange(next: string) {
     setDescription(next);
+    markTyping('description');
     if (descriptionTimer.current) clearTimeout(descriptionTimer.current);
     descriptionTimer.current = setTimeout(() => {
       descriptionTimer.current = null;
@@ -357,21 +370,23 @@ function IssuePage() {
     }
   }
 
-  function sendCommentTyping(active: boolean) {
-    void setIssueTypingFn({ data: { issueId: issue.id, active } }).catch(() => undefined);
+  function sendTyping(active: boolean, field: 'comment' | 'description') {
+    void setIssueTypingFn({ data: { issueId: issue.id, active, field } }).catch(() => undefined);
   }
 
   // Mirrors the chat composer: at most one "typing" write every 2 s, cleared after 2.6 s idle.
-  function markCommentTyping() {
+  // Moving from the comment box to the description (or back) reports the new place at once.
+  function markTyping(field: 'comment' | 'description') {
     if (typingIdle.current) clearTimeout(typingIdle.current);
     typingIdle.current = setTimeout(() => {
       typingIdle.current = null;
       typingSentAt.current = 0;
-      sendCommentTyping(false);
+      sendTyping(false, field);
     }, 2600);
-    if (Date.now() - typingSentAt.current < 2000) return;
+    if (typingFieldRef.current === field && Date.now() - typingSentAt.current < 2000) return;
+    typingFieldRef.current = field;
     typingSentAt.current = Date.now();
-    sendCommentTyping(true);
+    sendTyping(true, field);
   }
 
   useEffect(
@@ -391,11 +406,16 @@ function IssuePage() {
       const result = await addTaskCommentFn({
         data: { issueId: issue.id, body: comment.trim() },
       });
-      setDetail((current) => ({
-        ...current,
-        comments: [...current.comments, result.comment],
-        issue: { ...current.issue, commentCount: current.issue.commentCount + 1 },
-      }));
+      // The live refresh this post triggers can land first; then the comment is already here.
+      setDetail((current) =>
+        current.comments.some((item) => item.id === result.comment.id)
+          ? current
+          : {
+              ...current,
+              comments: [...current.comments, result.comment],
+              issue: { ...current.issue, commentCount: current.issue.commentCount + 1 },
+            },
+      );
       setComment('');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not post the comment.');
@@ -450,6 +470,29 @@ function IssuePage() {
     }
   }
 
+  async function copyBranchName() {
+    const branch = gitBranchName(snapshot.me, issue);
+    try {
+      await navigator.clipboard.writeText(branch);
+      toast.success(`Copied ${branch}`, { description: 'Open a pull request from this branch to link it here.' });
+    } catch {
+      toast.error('Copy failed.');
+    }
+  }
+
+  useEffect(() => {
+    // Linear: Cmd/Ctrl+Shift+. copies the git branch name, even while typing.
+    if (!GITHUB_ENABLED) return;
+    const onBranchKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && (event.key === '.' || event.code === 'Period')) {
+        event.preventDefault();
+        void copyBranchName();
+      }
+    };
+    window.addEventListener('keydown', onBranchKey);
+    return () => window.removeEventListener('keydown', onBranchKey);
+  });
+
   useEffect(() => {
     // Linear: C opens a new issue from anywhere, including an issue page.
     const onKey = (event: KeyboardEvent) => {
@@ -471,7 +514,20 @@ function IssuePage() {
   const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
   const canDelete = isAdmin || detail.createdBy?.id === snapshot.me.id;
   const otherEditors = detail.editors.filter((editor) => editor.id !== snapshot.me.id);
+  const issueRefs = useMemo(
+    () =>
+      snapshot.issues.map((item) => ({
+        id: item.id,
+        key: item.key,
+        title: item.title,
+        status: item.status,
+        priority: item.priority,
+        assignee: item.assignee,
+      })),
+    [snapshot.issues],
+  );
   const otherTyping = detail.commentTyping.filter((person) => person.id !== snapshot.me.id);
+  const otherDescriptionEditors = detail.descriptionEditing.filter((person) => person.id !== snapshot.me.id);
   const overdue =
     Boolean(issue.dueDate) &&
     issue.status.category !== 'completed' &&
@@ -602,6 +658,17 @@ function IssuePage() {
                 <Loader2 size={12} className="animate-spin" /> Saving
               </span>
             )}
+            {GITHUB_ENABLED && (
+              <button
+                type="button"
+                onClick={() => void copyBranchName()}
+                className="grid size-8 place-items-center rounded-md text-muted transition-colors duration-100 hover:bg-ink/[0.05] hover:text-ink"
+                aria-label="Copy git branch name"
+                title="Copy git branch name (⌘⇧.)"
+              >
+                <GitBranch size={15} />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void copyLink()}
@@ -685,6 +752,9 @@ function IssuePage() {
               )}
 
               <div className="mt-3">
+                {otherDescriptionEditors.length > 0 && (
+                  <EditingRow people={otherDescriptionEditors} />
+                )}
                 <MarkdownEditor
                   variant="bare"
                   minHeight={72}
@@ -707,6 +777,13 @@ function IssuePage() {
                 onAttach={(childId) => void setChildParent(childId, issue.id)}
                 onDetach={(childId) => void setChildParent(childId, null)}
               />
+
+              {GITHUB_ENABLED && detail.pullRequests.length > 0 && (
+                <section className="mt-8 lg:hidden" aria-label="Pull requests">
+                  <h2 className="mb-2 text-[13px] font-semibold text-ink-soft">Pull requests</h2>
+                  <PullRequestList pullRequests={detail.pullRequests} />
+                </section>
+              )}
 
               <section className="mt-10 border-t border-line pt-8" aria-labelledby="activity-heading">
                 <h2 id="activity-heading" className="text-[15px] font-semibold tracking-[-0.01em]">
@@ -748,9 +825,10 @@ function IssuePage() {
                             {relativeTime(entry.comment.createdAt)}
                           </time>
                         </div>
-                        <p className="mt-2 text-[14px] leading-6 whitespace-pre-wrap text-ink-soft">
-                          <CommentBody body={entry.comment.body} issues={snapshot.issues} />
-                        </p>
+                        <div className="mt-2 text-[14px] leading-6 text-ink-soft">
+                          <RichText body={entry.comment.body} issues={issueRefs} members={snapshot.members} />
+                          <IssueEmbeds body={entry.comment.body} issues={issueRefs} compact />
+                        </div>
                       </li>
                     ),
                   )}
@@ -759,21 +837,18 @@ function IssuePage() {
                 {otherTyping.length > 0 && <TypingRow people={otherTyping} className="mt-4 pl-1" />}
 
                 <div className="mt-5 rounded-lg border border-line bg-paper transition-[border-color,box-shadow] duration-150 focus-within:border-ink/25 focus-within:shadow-[0_0_0_3px_rgba(23,26,26,0.04)]">
-                  <textarea
+                  <MarkdownEditor
+                    variant="bare"
+                    minHeight={44}
                     value={comment}
-                    onChange={(event) => {
-                      setComment(event.target.value);
-                      markCommentTyping();
+                    onChange={(next) => {
+                      setComment(next);
+                      markTyping('comment');
                     }}
-                    onKeyDown={(event) => {
-                      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                        event.preventDefault();
-                        void submitComment();
-                      }
-                    }}
+                    onSubmit={() => void submitComment()}
                     placeholder="Leave a comment…"
-                    aria-label="Leave a comment"
-                    className="field-sizing-content block min-h-[64px] w-full resize-none bg-transparent px-4 pt-3 text-[16px] leading-6 outline-none placeholder:text-faint sm:text-[14px]"
+                    ariaLabel="Leave a comment"
+                    className="px-4 pt-3 text-[14px]"
                   />
                   <div className="flex items-center justify-end gap-2 px-2 pb-2">
                     <span className="hidden text-[12px] text-faint sm:inline">⌘↵</span>
@@ -819,6 +894,11 @@ function IssuePage() {
                 slug={snapshot.workspace.slug}
               />
             </PanelSection>
+            {GITHUB_ENABLED && detail.pullRequests.length > 0 && (
+              <PanelSection title="Pull requests">
+                <PullRequestList pullRequests={detail.pullRequests} />
+              </PanelSection>
+            )}
             <PanelSection title="Team">
               <div className="flex h-8 items-center gap-2 px-2 text-[13px] font-medium text-ink-soft">
                 <span className="grid size-5 place-items-center">
@@ -930,54 +1010,45 @@ function historySentence(event: TaskEvent): React.ReactNode {
       return 'moved the issue to the trash';
     case 'restored':
       return 'restored the issue from the trash';
+    case 'pull_request': {
+      if (!event.from) return <>linked pull request {strong(event.to)}</>;
+      const change: Record<string, string> = {
+        merged: 'was merged',
+        closed: 'was closed',
+        open: 'is open for review',
+        draft: 'was marked as a draft',
+      };
+      return (
+        <>
+          pull request {strong(event.from)} {change[event.to ?? ''] ?? 'changed'}
+        </>
+      );
+    }
     default:
       return 'updated the issue';
   }
 }
 
-const ISSUE_KEY_IN_TEXT = /\b[A-Z][A-Z0-9]{1,4}-\d{1,6}\b/g;
 
 /** Comment text with issue keys (KOR-12) shown as live chips, like in chat. */
-function CommentBody({ body, issues }: { body: string; issues: TaskIssue[] }) {
-  const byKey = new Map(issues.map((item) => [item.key, item]));
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  for (const match of body.matchAll(ISSUE_KEY_IN_TEXT)) {
-    const ref = byKey.get(match[0]);
-    if (!ref || match.index === undefined) continue;
-    parts.push(body.slice(last, match.index));
-    parts.push(
-      <IssueChip
-        key={`${match.index}-${ref.id}`}
-        issue={{
-          id: ref.id,
-          key: ref.key,
-          title: ref.title,
-          status: ref.status,
-          priority: ref.priority,
-          assignee: ref.assignee,
-        }}
-        className="align-middle"
-      />,
-    );
-    last = match.index + match[0].length;
-  }
-  parts.push(body.slice(last));
-  return <>{parts}</>;
-}
 
 function HistoryLine({ event }: { event: TaskEvent }) {
+  // Lines with no person are written by the GitHub webhook (links and the status moves they cause).
+  const fromGithub = !event.actor && (event.kind === 'pull_request' || event.kind === 'status');
   return (
     <li className="flex items-start gap-2 pl-1 text-[13px] leading-5 text-muted">
       <span className="grid size-5 shrink-0 place-items-center">
         {event.actor ? (
           <Avatar name={event.actor.name} src={event.actor.avatarUrl} color={event.actor.avatarColor} size="2xs" />
+        ) : fromGithub ? (
+          <GitPullRequest size={13} className="text-ink-soft" />
         ) : (
           <CircleDot size={12} className="text-faint" />
         )}
       </span>
       <span className="min-w-0">
         {event.actor && <span className="font-medium text-ink-soft">{event.actor.name} </span>}
+        {fromGithub && <span className="font-medium text-ink-soft">GitHub </span>}
         {historySentence(event)}
         <span aria-hidden="true"> · </span>
         <time dateTime={event.createdAt} suppressHydrationWarning>
@@ -1091,6 +1162,26 @@ function IssuePropertyControls({
         menuClassName="max-w-[340px]"
       />
     </>
+  );
+}
+
+/** Linear's "is editing" hint above the description while a teammate types in it. */
+function EditingRow({ people }: { people: UserSummary[] }) {
+  const names = people.map((person) => person.name.split(' ')[0]);
+  const who = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : 'Several people';
+  return (
+    <div className="mb-2 flex items-center gap-2 text-[12px] text-ink-soft" aria-live="polite">
+      <AvatarStack people={people} max={3} size="2xs" />
+      <span>
+        <span className="font-semibold text-ink">{who}</span> {names.length === 1 ? 'is' : 'are'} editing the
+        description
+      </span>
+      <span className="flex items-end gap-0.5 pb-0.5">
+        <span className="typing-dot size-1 rounded-full bg-muted" />
+        <span className="typing-dot size-1 rounded-full bg-muted" />
+        <span className="typing-dot size-1 rounded-full bg-muted" />
+      </span>
+    </div>
   );
 }
 

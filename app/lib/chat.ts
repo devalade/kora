@@ -1026,7 +1026,12 @@ export const sendMessageFn = createServerFn({ method: 'POST' })
       console.error('Could not record message references', error);
     }
     await publish(channel.workspaceId, [
-      toChannel(data.channelId, { t: 'chat', c: data.channelId, ...(data.parentId ? { m: data.parentId } : {}) }),
+      toChannel(data.channelId, {
+        t: 'chat',
+        c: data.channelId,
+        u: me.id,
+        ...(data.parentId ? { m: data.parentId } : {}),
+      }),
     ]);
     return { id };
   });
@@ -1104,7 +1109,15 @@ export const setTypingFn = createServerFn({ method: 'POST' })
         typingThreadId: data.active ? (data.threadId ?? null) : null,
       })
       .where(and(eq(channelMembers.channelId, data.channelId), eq(channelMembers.userId, me.id)));
-    await publish(channel.workspaceId, [toChannel(data.channelId, { t: 'typing', c: data.channelId })]);
+    await publish(channel.workspaceId, [
+      toChannel(data.channelId, {
+        t: 'typing',
+        c: data.channelId,
+        u: me.id,
+        on: data.active,
+        ...(data.active && data.threadId ? { m: data.threadId } : {}),
+      }),
+    ]);
     return { ok: true as const };
   });
 

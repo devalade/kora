@@ -48,7 +48,8 @@ export async function notify({
 }: {
   workspaceId: string;
   userIds: string[];
-  actorId: string;
+  /** Null when no person acted (GitHub moved the issue). */
+  actorId: string | null;
   kind: NotificationKind;
   issueId?: string | null;
   channelId?: string | null;
