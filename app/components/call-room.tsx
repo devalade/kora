@@ -492,6 +492,7 @@ export function CallRoom({
           )}
         >
           <VideoTile
+            name={me.name}
             label={`${me.name} (you)`}
             color={me.avatarColor}
             avatarUrl={me.avatarUrl}
@@ -504,6 +505,7 @@ export function CallRoom({
           {tiles.map((participant) => (
             <VideoTile
               key={participant.userId}
+              name={participant.name}
               label={participant.name}
               color={participant.avatarColor}
               avatarUrl={participant.avatarUrl}
@@ -583,6 +585,7 @@ function ControlButton({
 }
 
 function VideoTile({
+  name,
   label,
   color,
   avatarUrl,
@@ -592,6 +595,7 @@ function VideoTile({
   sharing,
   isLocal,
 }: {
+  name: string;
   label: string;
   color: string;
   avatarUrl?: string | null;
@@ -630,7 +634,7 @@ function VideoTile({
       {!hasVideo && (
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center gap-3">
-            <Avatar name={label} color={color} src={avatarUrl} size="2xl" />
+            <Avatar name={name} color={color} src={avatarUrl} size="2xl" />
             <span className="text-xs text-white/45">Camera off</span>
           </div>
         </div>
