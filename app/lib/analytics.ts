@@ -1,5 +1,5 @@
 // Product analytics and client error reporting with PostHog. Client only; it does nothing until
-// VITE_POSTHOG_KEY is set, and it never runs in local development unless VITE_POSTHOG_DEV is set.
+// VITE_POSTHOG_PROJECT_TOKEN is set, and it never runs in local development unless VITE_POSTHOG_DEV is set.
 //
 // Chat is private, so the setup is deliberately quiet: no session recording, every autocaptured
 // element's text and attributes are masked, and people are identified by their Kora id only (no
@@ -15,7 +15,7 @@ let identifiedAs: string | null = null;
 
 function enabled() {
   if (typeof window === 'undefined') return false;
-  if (!import.meta.env.VITE_POSTHOG_KEY) return false;
+  if (!import.meta.env.VITE_POSTHOG_PROJECT_TOKEN) return false;
   return !import.meta.env.DEV || Boolean(import.meta.env.VITE_POSTHOG_DEV);
 }
 
@@ -23,7 +23,7 @@ function load(): Promise<PostHog | null> {
   if (!enabled()) return Promise.resolve(null);
   loading ??= import('posthog-js')
     .then(({ default: posthog }) => {
-      posthog.init(import.meta.env.VITE_POSTHOG_KEY as string, {
+      posthog.init(import.meta.env.VITE_POSTHOG_PROJECT_TOKEN as string, {
         api_host: (import.meta.env.VITE_POSTHOG_HOST as string | undefined) ?? 'https://us.i.posthog.com',
         person_profiles: 'identified_only',
         capture_pageview: 'history_change',

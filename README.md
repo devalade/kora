@@ -83,7 +83,7 @@ huddles move between them.
 - Rate limits on messages, uploads, issues, comments, channels and workspaces (MCP included)
 - 404 and error pages, Terms and Privacy, Open Graph tags, robots.txt and a sitemap
 - `?` opens a keyboard shortcut sheet
-- PostHog analytics and client error reporting when `VITE_POSTHOG_KEY` is set (no session
+- PostHog analytics and client error reporting when `VITE_POSTHOG_PROJECT_TOKEN` is set (no session
   recording, text masked); server logs in Workers observability
 - Responsive app shell with a mobile navigation drawer
 
