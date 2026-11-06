@@ -12,11 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as ApiAvatarRouteImport } from './routes/api.avatar'
 import { Route as ApiLinkPreviewRouteImport } from './routes/api.link-preview'
+import { Route as ApiLinkPreviewImageRouteImport } from './routes/api.link-preview-image'
 import { Route as ApiUploadRouteImport } from './routes/api.upload'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as JoinCodeRouteImport } from './routes/join.$code'
+import { Route as ApiAvatarsUserIdRouteImport } from './routes/api.avatars.$userId'
 import { Route as ApiFilesIdRouteImport } from './routes/api.files.$id'
+import { Route as ApiRealtimePresenceRouteImport } from './routes/api.realtime.presence'
 import { Route as AppWorkspaceSlugIndexRouteImport } from './routes/app.$workspaceSlug.index'
 import { Route as AppWorkspaceSlugChannelIdRouteImport } from './routes/app.$workspaceSlug.$channelId'
 import { Route as AppWorkspaceSlugInboxRouteImport } from './routes/app.$workspaceSlug.inbox'
@@ -26,6 +30,7 @@ import { Route as AppWorkspaceSlugTasksIndexRouteImport } from './routes/app.$wo
 import { Route as AppWorkspaceSlugTasksIssueKeyRouteImport } from './routes/app.$workspaceSlug.tasks.$issueKey'
 import { Route as AppWorkspaceSlugTasksNewRouteImport } from './routes/app.$workspaceSlug.tasks.new'
 import { Route as AppWorkspaceSlugTasksProjectsRouteImport } from './routes/app.$workspaceSlug.tasks.projects'
+import { Route as AppWorkspaceSlugTasksTrashRouteImport } from './routes/app.$workspaceSlug.tasks.trash'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -42,9 +47,19 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAvatarRoute = ApiAvatarRouteImport.update({
+  id: '/api/avatar',
+  path: '/api/avatar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiLinkPreviewRoute = ApiLinkPreviewRouteImport.update({
   id: '/api/link-preview',
   path: '/api/link-preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLinkPreviewImageRoute = ApiLinkPreviewImageRouteImport.update({
+  id: '/api/link-preview-image',
+  path: '/api/link-preview-image',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiUploadRoute = ApiUploadRouteImport.update({
@@ -62,9 +77,19 @@ const JoinCodeRoute = JoinCodeRouteImport.update({
   path: '/join/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAvatarsUserIdRoute = ApiAvatarsUserIdRouteImport.update({
+  id: '/api/avatars/$userId',
+  path: '/api/avatars/$userId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiFilesIdRoute = ApiFilesIdRouteImport.update({
   id: '/api/files/$id',
   path: '/api/files/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRealtimePresenceRoute = ApiRealtimePresenceRouteImport.update({
+  id: '/api/realtime/presence',
+  path: '/api/realtime/presence',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppWorkspaceSlugIndexRoute = AppWorkspaceSlugIndexRouteImport.update({
@@ -117,16 +142,26 @@ const AppWorkspaceSlugTasksProjectsRoute =
     path: '/projects',
     getParentRoute: () => AppWorkspaceSlugTasksRoute,
   } as any)
+const AppWorkspaceSlugTasksTrashRoute =
+  AppWorkspaceSlugTasksTrashRouteImport.update({
+    id: '/trash',
+    path: '/trash',
+    getParentRoute: () => AppWorkspaceSlugTasksRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/api/avatar': typeof ApiAvatarRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
+  '/api/link-preview-image': typeof ApiLinkPreviewImageRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app/': typeof AppIndexRoute
+  '/api/avatars/$userId': typeof ApiAvatarsUserIdRoute
   '/api/files/$id': typeof ApiFilesIdRoute
+  '/api/realtime/presence': typeof ApiRealtimePresenceRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
   '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
   '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
@@ -135,17 +170,22 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceSlug/tasks/$issueKey': typeof AppWorkspaceSlugTasksIssueKeyRoute
   '/app/$workspaceSlug/tasks/new': typeof AppWorkspaceSlugTasksNewRoute
   '/app/$workspaceSlug/tasks/projects': typeof AppWorkspaceSlugTasksProjectsRoute
+  '/app/$workspaceSlug/tasks/trash': typeof AppWorkspaceSlugTasksTrashRoute
   '/app/$workspaceSlug/tasks/': typeof AppWorkspaceSlugTasksIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/api/avatar': typeof ApiAvatarRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
+  '/api/link-preview-image': typeof ApiLinkPreviewImageRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app': typeof AppIndexRoute
+  '/api/avatars/$userId': typeof ApiAvatarsUserIdRoute
   '/api/files/$id': typeof ApiFilesIdRoute
+  '/api/realtime/presence': typeof ApiRealtimePresenceRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
   '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
   '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
@@ -153,6 +193,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceSlug/tasks/$issueKey': typeof AppWorkspaceSlugTasksIssueKeyRoute
   '/app/$workspaceSlug/tasks/new': typeof AppWorkspaceSlugTasksNewRoute
   '/app/$workspaceSlug/tasks/projects': typeof AppWorkspaceSlugTasksProjectsRoute
+  '/app/$workspaceSlug/tasks/trash': typeof AppWorkspaceSlugTasksTrashRoute
   '/app/$workspaceSlug/tasks': typeof AppWorkspaceSlugTasksIndexRoute
 }
 export interface FileRoutesById {
@@ -160,11 +201,15 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/api/avatar': typeof ApiAvatarRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
+  '/api/link-preview-image': typeof ApiLinkPreviewImageRoute
   '/api/upload': typeof ApiUploadRoute
   '/join/$code': typeof JoinCodeRoute
   '/app/': typeof AppIndexRoute
+  '/api/avatars/$userId': typeof ApiAvatarsUserIdRoute
   '/api/files/$id': typeof ApiFilesIdRoute
+  '/api/realtime/presence': typeof ApiRealtimePresenceRoute
   '/app/$workspaceSlug/$channelId': typeof AppWorkspaceSlugChannelIdRoute
   '/app/$workspaceSlug/inbox': typeof AppWorkspaceSlugInboxRoute
   '/app/$workspaceSlug/office': typeof AppWorkspaceSlugOfficeRoute
@@ -173,6 +218,7 @@ export interface FileRoutesById {
   '/app/$workspaceSlug/tasks/$issueKey': typeof AppWorkspaceSlugTasksIssueKeyRoute
   '/app/$workspaceSlug/tasks/new': typeof AppWorkspaceSlugTasksNewRoute
   '/app/$workspaceSlug/tasks/projects': typeof AppWorkspaceSlugTasksProjectsRoute
+  '/app/$workspaceSlug/tasks/trash': typeof AppWorkspaceSlugTasksTrashRoute
   '/app/$workspaceSlug/tasks/': typeof AppWorkspaceSlugTasksIndexRoute
 }
 export interface FileRouteTypes {
@@ -181,11 +227,15 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/api/avatar'
     | '/api/link-preview'
+    | '/api/link-preview-image'
     | '/api/upload'
     | '/join/$code'
     | '/app/'
+    | '/api/avatars/$userId'
     | '/api/files/$id'
+    | '/api/realtime/presence'
     | '/app/$workspaceSlug/$channelId'
     | '/app/$workspaceSlug/inbox'
     | '/app/$workspaceSlug/office'
@@ -194,17 +244,22 @@ export interface FileRouteTypes {
     | '/app/$workspaceSlug/tasks/$issueKey'
     | '/app/$workspaceSlug/tasks/new'
     | '/app/$workspaceSlug/tasks/projects'
+    | '/app/$workspaceSlug/tasks/trash'
     | '/app/$workspaceSlug/tasks/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/login'
     | '/signup'
+    | '/api/avatar'
     | '/api/link-preview'
+    | '/api/link-preview-image'
     | '/api/upload'
     | '/join/$code'
     | '/app'
+    | '/api/avatars/$userId'
     | '/api/files/$id'
+    | '/api/realtime/presence'
     | '/app/$workspaceSlug/$channelId'
     | '/app/$workspaceSlug/inbox'
     | '/app/$workspaceSlug/office'
@@ -212,17 +267,22 @@ export interface FileRouteTypes {
     | '/app/$workspaceSlug/tasks/$issueKey'
     | '/app/$workspaceSlug/tasks/new'
     | '/app/$workspaceSlug/tasks/projects'
+    | '/app/$workspaceSlug/tasks/trash'
     | '/app/$workspaceSlug/tasks'
   id:
     | '__root__'
     | '/'
     | '/login'
     | '/signup'
+    | '/api/avatar'
     | '/api/link-preview'
+    | '/api/link-preview-image'
     | '/api/upload'
     | '/join/$code'
     | '/app/'
+    | '/api/avatars/$userId'
     | '/api/files/$id'
+    | '/api/realtime/presence'
     | '/app/$workspaceSlug/$channelId'
     | '/app/$workspaceSlug/inbox'
     | '/app/$workspaceSlug/office'
@@ -231,6 +291,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceSlug/tasks/$issueKey'
     | '/app/$workspaceSlug/tasks/new'
     | '/app/$workspaceSlug/tasks/projects'
+    | '/app/$workspaceSlug/tasks/trash'
     | '/app/$workspaceSlug/tasks/'
   fileRoutesById: FileRoutesById
 }
@@ -238,11 +299,15 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
+  ApiAvatarRoute: typeof ApiAvatarRoute
   ApiLinkPreviewRoute: typeof ApiLinkPreviewRoute
+  ApiLinkPreviewImageRoute: typeof ApiLinkPreviewImageRoute
   ApiUploadRoute: typeof ApiUploadRoute
   JoinCodeRoute: typeof JoinCodeRoute
   AppIndexRoute: typeof AppIndexRoute
+  ApiAvatarsUserIdRoute: typeof ApiAvatarsUserIdRoute
   ApiFilesIdRoute: typeof ApiFilesIdRoute
+  ApiRealtimePresenceRoute: typeof ApiRealtimePresenceRoute
   AppWorkspaceSlugChannelIdRoute: typeof AppWorkspaceSlugChannelIdRoute
   AppWorkspaceSlugInboxRoute: typeof AppWorkspaceSlugInboxRoute
   AppWorkspaceSlugOfficeRoute: typeof AppWorkspaceSlugOfficeRoute
@@ -273,11 +338,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/avatar': {
+      id: '/api/avatar'
+      path: '/api/avatar'
+      fullPath: '/api/avatar'
+      preLoaderRoute: typeof ApiAvatarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/link-preview': {
       id: '/api/link-preview'
       path: '/api/link-preview'
       fullPath: '/api/link-preview'
       preLoaderRoute: typeof ApiLinkPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/link-preview-image': {
+      id: '/api/link-preview-image'
+      path: '/api/link-preview-image'
+      fullPath: '/api/link-preview-image'
+      preLoaderRoute: typeof ApiLinkPreviewImageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/upload': {
@@ -301,11 +380,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JoinCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/avatars/$userId': {
+      id: '/api/avatars/$userId'
+      path: '/api/avatars/$userId'
+      fullPath: '/api/avatars/$userId'
+      preLoaderRoute: typeof ApiAvatarsUserIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/files/$id': {
       id: '/api/files/$id'
       path: '/api/files/$id'
       fullPath: '/api/files/$id'
       preLoaderRoute: typeof ApiFilesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/realtime/presence': {
+      id: '/api/realtime/presence'
+      path: '/api/realtime/presence'
+      fullPath: '/api/realtime/presence'
+      preLoaderRoute: typeof ApiRealtimePresenceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/$workspaceSlug/': {
@@ -371,6 +464,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceSlugTasksProjectsRouteImport
       parentRoute: typeof AppWorkspaceSlugTasksRoute
     }
+    '/app/$workspaceSlug/tasks/trash': {
+      id: '/app/$workspaceSlug/tasks/trash'
+      path: '/trash'
+      fullPath: '/app/$workspaceSlug/tasks/trash'
+      preLoaderRoute: typeof AppWorkspaceSlugTasksTrashRouteImport
+      parentRoute: typeof AppWorkspaceSlugTasksRoute
+    }
   }
 }
 
@@ -378,6 +478,7 @@ interface AppWorkspaceSlugTasksRouteChildren {
   AppWorkspaceSlugTasksIssueKeyRoute: typeof AppWorkspaceSlugTasksIssueKeyRoute
   AppWorkspaceSlugTasksNewRoute: typeof AppWorkspaceSlugTasksNewRoute
   AppWorkspaceSlugTasksProjectsRoute: typeof AppWorkspaceSlugTasksProjectsRoute
+  AppWorkspaceSlugTasksTrashRoute: typeof AppWorkspaceSlugTasksTrashRoute
   AppWorkspaceSlugTasksIndexRoute: typeof AppWorkspaceSlugTasksIndexRoute
 }
 
@@ -385,6 +486,7 @@ const AppWorkspaceSlugTasksRouteChildren: AppWorkspaceSlugTasksRouteChildren = {
   AppWorkspaceSlugTasksIssueKeyRoute: AppWorkspaceSlugTasksIssueKeyRoute,
   AppWorkspaceSlugTasksNewRoute: AppWorkspaceSlugTasksNewRoute,
   AppWorkspaceSlugTasksProjectsRoute: AppWorkspaceSlugTasksProjectsRoute,
+  AppWorkspaceSlugTasksTrashRoute: AppWorkspaceSlugTasksTrashRoute,
   AppWorkspaceSlugTasksIndexRoute: AppWorkspaceSlugTasksIndexRoute,
 }
 
@@ -397,11 +499,15 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
+  ApiAvatarRoute: ApiAvatarRoute,
   ApiLinkPreviewRoute: ApiLinkPreviewRoute,
+  ApiLinkPreviewImageRoute: ApiLinkPreviewImageRoute,
   ApiUploadRoute: ApiUploadRoute,
   JoinCodeRoute: JoinCodeRoute,
   AppIndexRoute: AppIndexRoute,
+  ApiAvatarsUserIdRoute: ApiAvatarsUserIdRoute,
   ApiFilesIdRoute: ApiFilesIdRoute,
+  ApiRealtimePresenceRoute: ApiRealtimePresenceRoute,
   AppWorkspaceSlugChannelIdRoute: AppWorkspaceSlugChannelIdRoute,
   AppWorkspaceSlugInboxRoute: AppWorkspaceSlugInboxRoute,
   AppWorkspaceSlugOfficeRoute: AppWorkspaceSlugOfficeRoute,

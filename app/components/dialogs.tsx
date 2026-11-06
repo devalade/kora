@@ -1,4 +1,5 @@
 import {
+  Camera,
   Check,
   Copy,
   Hash,
@@ -17,7 +18,7 @@ import {
   searchMessagesFn,
   updateChannelFn,
 } from '../lib/chat';
-import { updateProfileFn } from '../lib/auth';
+import { signOutEverywhereFn, updateProfileFn } from '../lib/auth';
 import type {
   ChannelSummary,
   SearchHit,
@@ -161,7 +162,7 @@ export function CreateChannelDialog({
                   }
                   className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-line-soft"
                 >
-                  <Avatar name={member.name} color={member.avatarColor} size="sm" online={member.online} />
+                  <Avatar name={member.name} src={member.avatarUrl} color={member.avatarColor} size="sm" online={member.online} />
                   <span className="flex-1 text-sm">{member.name}</span>
                   <span
                     className={cn(
@@ -330,7 +331,7 @@ export function InviteDialog({
           <div className="scroll-thin max-h-56 space-y-1 overflow-y-auto">
             {snapshot.members.map((member) => (
               <div key={member.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-                <Avatar name={member.name} color={member.avatarColor} size="sm" online={member.online} />
+                <Avatar name={member.name} src={member.avatarUrl} color={member.avatarColor} size="sm" online={member.online} />
                 <span className="flex-1 text-sm">{member.name}</span>
                 <span className="text-[11px] text-faint">{member.title}</span>
               </div>
@@ -387,7 +388,7 @@ export function NewDmDialog({
               disabled={busy === member.id}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-canvas"
             >
-              <Avatar name={member.name} color={member.avatarColor} size="md" online={member.online} />
+              <Avatar name={member.name} src={member.avatarUrl} color={member.avatarColor} size="md" online={member.online} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-semibold">{member.name}</span>
                 <span className="block truncate text-[11px] text-muted">
@@ -534,7 +535,7 @@ export function SearchDialog({
             )}
           >
             <Avatar
-              name={hit.message.author.name}
+              name={hit.message.author.name} src={hit.message.author.avatarUrl}
               color={hit.message.author.avatarColor}
               size="sm"
             />
@@ -582,6 +583,7 @@ export function ProfileDialog({
   const [statusEmoji, setStatusEmoji] = useState(me.statusEmoji);
   const [statusText, setStatusText] = useState(me.statusText);
   const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -607,16 +609,22 @@ export function ProfileDialog({
     }
   }
 
+  async function signOutEverywhere() {
+    if (!window.confirm('Sign out of Kora on every device, including this one?')) return;
+    setSigningOut(true);
+    try {
+      await signOutEverywhereFn();
+      window.location.assign('/login');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not sign out.');
+      setSigningOut(false);
+    }
+  }
+
   return (
     <Modal open={open} onClose={onClose} title="Your profile" description="How you show up in Kora.">
       <div className="space-y-4">
-        <div className="flex items-center gap-4 rounded-2xl bg-canvas p-4">
-          <Avatar name={name || me.name} color={me.avatarColor} size="xl" />
-          <div>
-            <p className="text-base font-semibold">{name || me.name}</p>
-            <p className="text-xs text-muted">{me.email}</p>
-          </div>
-        </div>
+        <ProfilePhoto me={me} name={name || me.name} onChanged={onSaved} />
         <label className="block">
           <span className="mb-1.5 block text-xs font-semibold text-ink-soft">Display name</span>
           <input
@@ -671,6 +679,18 @@ export function ProfileDialog({
             {saving && <Loader2 size={14} className="animate-spin" />}
             Save profile
           </button>
+        </div>
+        <div className="border-t border-line pt-4">
+          <button
+            type="button"
+            onClick={() => void signOutEverywhere()}
+            disabled={signingOut}
+            className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium text-danger hover:bg-danger/5 disabled:opacity-40"
+          >
+            {signingOut && <Loader2 size={14} className="animate-spin" />}
+            Sign out of all devices
+          </button>
+          <p className="mt-1 px-3 text-xs text-muted">Ends every session for your account, on every browser.</p>
         </div>
       </div>
     </Modal>
@@ -753,5 +773,131 @@ export function ChannelDetailsDialog({
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Crops to a centred square and scales to 256px, so uploads stay small and every avatar is round-safe. */
+async function squarePhoto(file: File): Promise<Blob> {
+  // Animated GIFs would lose their frames on a canvas; send them as they are.
+  if (file.type === 'image/gif') return file;
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(bitmap.width, bitmap.height);
+  const size = Math.min(256, side);
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) return file;
+  context.drawImage(
+    bitmap,
+    (bitmap.width - side) / 2,
+    (bitmap.height - side) / 2,
+    side,
+    side,
+    0,
+    0,
+    size,
+    size,
+  );
+  bitmap.close();
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9));
+  return blob ?? file;
+}
+
+function ProfilePhoto({
+  me,
+  name,
+  onChanged,
+}: {
+  me: UserSummary;
+  name: string;
+  onChanged: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  // The parent refreshes `me` on its next poll; show the new photo right away meanwhile.
+  const [photo, setPhoto] = useState<string | null | undefined>(undefined);
+  const [busy, setBusy] = useState<'upload' | 'remove' | null>(null);
+  const current = photo === undefined ? me.avatarUrl : photo;
+
+  async function upload(file: File) {
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+      toast.error('Use a PNG, JPEG, WebP or GIF image.');
+      return;
+    }
+    setBusy('upload');
+    try {
+      const body = new FormData();
+      const blob = await squarePhoto(file);
+      body.append('file', blob, blob === file ? file.name : 'avatar.webp');
+      const response = await fetch('/api/avatar', { method: 'POST', body });
+      const result = (await response.json().catch(() => ({}))) as { avatarUrl?: string; error?: string };
+      if (!response.ok || !result.avatarUrl) throw new Error(result.error ?? 'Could not upload the photo.');
+      setPhoto(result.avatarUrl);
+      toast.success('Photo updated.');
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not upload the photo.');
+    } finally {
+      setBusy(null);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+
+  async function remove() {
+    setBusy('remove');
+    try {
+      const response = await fetch('/api/avatar', { method: 'DELETE' });
+      if (!response.ok) throw new Error('Could not remove the photo.');
+      setPhoto(null);
+      toast.success('Photo removed.');
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not remove the photo.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-4 rounded-2xl bg-canvas p-4">
+      <Avatar name={name} color={me.avatarColor} src={current} size="xl" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-base font-semibold">{name}</p>
+        <p className="truncate text-xs text-muted">{me.email}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="sr-only"
+            aria-label="Choose a profile photo"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void upload(file);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy !== null}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-semibold text-paper transition-colors duration-150 hover:bg-ink-soft disabled:opacity-50"
+          >
+            {busy === 'upload' ? <Loader2 size={13} className="animate-spin" /> : <Camera size={13} />}
+            {current ? 'Change photo' : 'Upload photo'}
+          </button>
+          {current && (
+            <button
+              type="button"
+              onClick={() => void remove()}
+              disabled={busy !== null}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium text-muted transition-colors duration-150 hover:bg-line-soft hover:text-ink disabled:opacity-50"
+            >
+              {busy === 'remove' && <Loader2 size={13} className="animate-spin" />}
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

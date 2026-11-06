@@ -32,7 +32,7 @@ huddles move between them.
 - Message threads with reply counts that update live
 - @mention autocomplete for workspace teammates, with mention badges in the sidebar
 - Markdown messages with bold, italic, strikethrough, inline code, code blocks, lists, quotes, and links
-- Link previews that unfurl the page title, description, site name, and Open Graph image
+- Link previews that unfurl the page title, description, site name, and Open Graph image; images load through an authenticated proxy so linked sites never see your readers
 - Issue references: type `#` in chat to pick an issue; `KOR-12` renders as a live chip, a key on its own line as an embed card, and the issue's history shows where it was mentioned
 - Emoji reactions, channel links, and seeded demo conversations
 - File and image uploads with live progress, thumbnail previews, and a fullscreen image lightbox
@@ -53,7 +53,15 @@ huddles move between them.
 - Live editor presence and cross-user issue updates while an issue is open
 - Quick-add rows for new issues and inline label creation, both with Enter to submit
 - A workspace workflow editor for adding, renaming, recoloring, reordering, and deleting custom statuses
-- Email and password accounts with hashed passwords and HttpOnly sessions
+- Email and password accounts with hashed passwords and HttpOnly sessions, sign-in rate limits, session
+  rotation, and "Sign out of all devices"
+- Roles: owners and admins manage the workflow, labels and teams and can delete anything; members
+  create and edit work and delete only the issues they created. The owner changes roles in
+  Members & roles
+- Deleted issues go to a Trash for 30 days and can be restored (Undo on delete, or from Trash)
+- Two people editing one description never overwrite each other: the later save is flagged as a
+  conflict and the editor chooses which text to keep
+- Profile photos, cropped and resized in the browser, visible only to people who share a workspace
 - Responsive app shell with a mobile navigation drawer
 
 ## Stack
@@ -66,8 +74,8 @@ huddles move between them.
 | Files | Cloudflare R2 through `void/storage` |
 | Runtime | Cloudflare Workers |
 | Video | WebRTC peer-to-peer mesh with STUN |
-| Signaling | D1-backed offer, answer, and ICE queues polled every 900 ms |
-| Realtime | Server function polling every 2 seconds plus immediate refresh after writes |
+| Signaling | D1-backed offer, answer, and ICE queues, fetched the moment a push says one is waiting |
+| Realtime | WebSockets on a companion Worker (`realtime/`) with one Durable Object per workspace; no polling |
 
 ## Run locally
 
@@ -78,6 +86,21 @@ npm install
 npx void db seed
 npm run dev
 ```
+
+`npm run dev` starts the app (Vite) and the realtime worker (`wrangler dev` on port 8787) together.
+Realtime needs two values in `.env`, the same secret on both sides:
+
+```bash
+# .env (the app)
+REALTIME_URL=http://localhost:8787
+REALTIME_SECRET=<any long random string>
+
+# realtime/.dev.vars (the worker)
+REALTIME_SECRET=<the same string>
+APP_ORIGIN=http://localhost:5174
+```
+
+Without them the app still works, but other people's changes only show when you return to the tab.
 
 Vite prints the local URL. The seed command resets the local D1 database, applies migrations, and
 loads the demo workspace.
@@ -119,14 +142,29 @@ are authenticated and checked against the channel that owns the message.
 
 ### How huddles work
 
-Each browser opens its camera and microphone with `getUserMedia`. Participants poll the active call
-and the signaling inbox. The participant with the lexicographically smaller user id creates the
+Each browser opens its camera and microphone with `getUserMedia`. Offers, answers and ICE candidates
+are queued in D1, and the recipient fetches them the moment the realtime socket says one is waiting. The participant with the lexicographically smaller user id creates the
 WebRTC offer, the other side answers, and ICE candidates are exchanged through D1. Audio and video
 flow directly between browsers.
 
-The default configuration uses Cloudflare and Google STUN servers. A production deployment behind
-restrictive NATs should add a TURN service. Put its credentials in the environment and the call room
-will include them automatically:
+The default configuration uses Cloudflare and Google STUN servers. Peers behind restrictive NATs need
+a TURN relay, and the call room asks the server for its ICE servers before it creates any peer
+connection (it still waits for the camera and microphone first). There are two ways to provide TURN.
+
+Cloudflare Realtime TURN (recommended). Create a TURN key in the Cloudflare dashboard, then store its
+id and API token as server secrets. The server mints 24-hour credentials per call from
+`https://rtc.live.cloudflare.com/v1/turn/keys/{key_id}/credentials/generate`, so nothing secret
+reaches the browser:
+
+```bash
+npx void secret put CF_TURN_KEY_ID
+npx void secret put CF_TURN_KEY_API_TOKEN
+```
+
+For local development put the same two names in `.env`. Both are optional keys in `env.ts`.
+
+Any other TURN service. Without the two keys above, the room uses these build-time values, which are
+embedded in the browser bundle, so only use a credential you can share:
 
 ```bash
 VITE_TURN_URL=turn:turn.example.com:3478
@@ -134,47 +172,110 @@ VITE_TURN_USERNAME=...
 VITE_TURN_CREDENTIAL=...
 ```
 
-Set those keys in your shell or in the deployment environment before building.
+Set those in your shell or in the deployment environment before building. If minting fails, the
+server falls back to this configuration and the public STUN servers.
 
-Polling is deliberate. Void typed WebSocket routes are not available in meta-framework mode, so the
-app uses server functions and cheap polling to stay compatible with TanStack Start. The seams are
-isolated: `workspaceSnapshotFn` for chat state and `pollCallSignalsFn` for calls. They can be
-replaced with Durable Objects or a dedicated realtime service without changing the UI.
+### How realtime works
+
+Nothing polls. Void's own realtime features (`void/live`, `.ws.ts` routes, `durable-objects/`) refuse
+to run in TanStack Start (framework) mode, and the app worker's generated entry exports only
+`default`, so it cannot host a Durable Object class. Realtime therefore lives in a small companion
+Worker, `realtime/` (`kora-realtime`):
+
+- One Durable Object per workspace (`WorkspaceHub`) holds every open WebSocket of that workspace,
+  using the hibernation API, so idle sockets cost nothing.
+- The browser asks the app for a ticket (`getRealtimeTicketFn`): an HMAC-signed, 5-minute grant
+  naming the workspace, the person, and the channels and DMs they belong to. The worker checks the
+  signature and the page's origin, then accepts the socket. When someone's channel access changes the
+  app pushes `grants` and the open socket swaps in a fresh ticket.
+- After every write, the app publishes a small event to the worker (`app/lib/realtime.ts`): what
+  changed and where (`chat` in channel X, `issue` Y, `inbox` for person Z, `typing`, `call`,
+  `signal`), never the content. Each screen refetches what it shows with the same server functions
+  as before (`useLiveRefresh` in `app/lib/realtime-client.ts`). Bursts collapse into one refetch.
+- Topics: `w` (everyone in the workspace), `c:<channel>` (only members, enforced by the ticket),
+  `u:<person>` (every tab of one person).
+- Presence comes from the sockets: the hub tells the app when someone's first tab connects or last
+  tab closes, and every 30 s while anyone is connected (`/api/realtime/presence`, authenticated with
+  the shared secret). `online` everywhere still reads `users.last_seen_at`.
+- A missed event never leaves a screen stale: on every (re)connect, and when a tab comes back, the
+  client refetches. The only timers left are a 25 s keepalive ping (answered without waking the
+  Durable Object) and two write heartbeats: huddle membership (20 s) and "viewing this issue" (20 s).
 
 ## Verification
 
-Three Playwright scripts cover the main paths. Start the dev server, then run:
+Playwright scripts cover the main paths. Start the dev server, then run:
 
 ```bash
 node scripts/smoke.mjs    # sign in, send a message, open a thread, search
 node scripts/upload.mjs   # upload an image and render it from R2
 node scripts/call.mjs     # two accounts join a huddle and exchange video
+node scripts/realtime.mjs # push delivery, no polling, presence, and the worker's ticket and secret checks
+node scripts/date-picker.mjs # the calendar picker: keyboard, Escape, quick picks, Clear, phone width
+node scripts/ssrf.mjs     # link-preview address rules (private ranges rejected, public hosts allowed)
 ```
 
-They expect the app at `http://localhost:5174`. Change the `base` constant if Vite picks another
+They expect the app at `http://localhost:5174` and the realtime worker at `http://localhost:8787`
+(both started by `npm run dev`). Change the `base` constant if Vite picks another
 port. The call script uses Chromium's fake media devices.
 
 ## Deploy
 
-Deployment is not included in this repository. To ship it to your own Cloudflare account:
+Sign in once, then always deploy with the script, never by hand:
 
 ```bash
 npx void auth login
-npx void deploy --platform cloudflare
+npx wrangler login
+npm run deploy
 ```
 
-Void provisions D1 and R2 bindings when needed. After the first deploy, run the migrations against
-the remote database with your normal Void or Wrangler workflow, then create an account or load demo
-data.
+Before the first deploy with realtime, set the shared secret on both Workers and tell the app where
+the realtime worker lives (the worker serves `realtime.kora.zecreator.com`, see
+`realtime/wrangler.jsonc`):
+
+```bash
+openssl rand -base64 32                                          # the shared secret
+npx wrangler secret put REALTIME_SECRET -c realtime/wrangler.jsonc
+npx void secret put REALTIME_SECRET
+npx void secret put REALTIME_URL                                 # https://realtime.kora.zecreator.com
+```
+
+`npm run deploy` runs, in order, and stops at the first failure:
+
+1. `npm run typecheck` and `npm run build`
+2. `npm run check:migrations`: refuses any migration that can delete data (`DROP TABLE`, table
+   rebuilds, `DELETE FROM`, `DROP COLUMN`) unless the file says `-- reviewed: <why it is safe>`, and
+   refuses when `db/schema.ts` no longer matches the latest migration snapshot
+3. `void db migrate --remote`
+4. `npm run deploy:realtime` (the `kora-realtime` worker)
+5. `void deploy --platform cloudflare`
+
+The realtime worker deploys before the app so the app never publishes to an older protocol. Steps 3
+to 5 run back to back because a migration that renames something breaks the previous code;
+the gap between them is the only window where old code meets the new schema.
+
+On D1 a `DROP TABLE` cascades through every `ON DELETE CASCADE` child, so a table rebuild of
+`issues` would delete every comment, label link and history line. Write such changes as additive
+migrations (`ALTER TABLE ... ADD`, `RENAME`) instead.
+
+`npx void db seed` and `npx void db reset` only touch the local database. Nothing in this repository
+runs SQL against the deployed database except `npm run deploy`; avoid `void db execute --remote` for
+anything that writes.
 
 ## Known limits
 
-- Realtime chat uses polling, not WebSockets or Durable Objects.
+- Realtime events are delivered at most once. A client that misses one (a deploy of the realtime worker drops every socket) catches up when it reconnects, a second or two later.
+- Each person can store 500 MB of uploads. Files uploaded but never attached to a message are deleted after 24 hours (checked on that person's next upload), and read inbox items are deleted after 90 days (checked when they open the inbox). Issue history is never pruned.
+- Link previews resolve the target host over DNS-over-HTTPS and refuse private, loopback, link-local, CGNAT and unique-local addresses. Workers in production also block private egress, so this is a second layer; DNS rebinding between the check and the connection is covered by that platform block, not by Kora.
 - Huddles are a peer-to-peer mesh, best for small rooms of two to four people.
-- TURN is optional. Without `VITE_TURN_*` credentials, some restrictive networks will fail to connect calls.
+- TURN is optional. Without `CF_TURN_KEY_ID` and `CF_TURN_KEY_API_TOKEN` (or `VITE_TURN_*`), some restrictive networks will fail to connect calls.
 - Email invites, push notifications, message editing, and message deletion are not built yet.
 - Search uses `LIKE` and is intended for small teams, not large message archives.
 - Inbox items for a chat message open the channel, not the exact message.
+- The task list loads the 500 most recently updated issues (the list says so when it is capped). While
+  it is capped, typing in the search box also asks the server, which matches title or key across every
+  issue (up to 50 results), so older issues are found too.
+- Sign-in locks an email for 15 minutes after 5 wrong passwords from the same IP address; a different
+  IP is not locked out. Across all IPs an email is limited to 50 failures per hour.
 - Project updates (status, lead, dates) are not recorded in an issue's history.
 
 ## License

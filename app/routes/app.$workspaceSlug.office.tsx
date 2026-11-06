@@ -1,4 +1,5 @@
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
+import { useLiveRefresh } from '../lib/realtime-client';
 import {
   Coffee,
   Map as MapIcon,
@@ -142,7 +143,7 @@ function OfficePage() {
       const next = await getOfficeFn({ data: { slug: params.workspaceSlug } });
       if (request === requestRef.current) setOffice(next);
     } catch {
-      // The next poll recovers a dropped read.
+      // The next event or reconnect refetches.
     }
   }, [params.workspaceSlug]);
 
@@ -150,24 +151,20 @@ function OfficePage() {
     setOffice(initial);
   }, [initial]);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
-    }, 3000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void load();
-    };
-    window.addEventListener('focus', onVisible);
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('focus', onVisible);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [load]);
+  // Pushed: moves, statuses, huddles, profiles and people coming online or leaving.
+  useLiveRefresh(params.workspaceSlug, load, (event) =>
+    event.t === 'workspace' || event.t === 'presence' || event.t === 'call',
+  );
 
+  // Close the room when the call ends, once this page has seen it (see the channel page).
+  const sawCall = useRef(false);
   useEffect(() => {
-    if (callOpen && !office.call) setCallOpen(false);
+    if (!callOpen) {
+      sawCall.current = false;
+      return;
+    }
+    if (office.call) sawCall.current = true;
+    else if (sawCall.current) setCallOpen(false);
   }, [callOpen, office.call]);
 
   useEffect(() => {
@@ -517,6 +514,7 @@ function OfficePage() {
 
       {callOpen && office.call && (
         <CallRoom
+          workspaceSlug={params.workspaceSlug}
           key={office.call.id}
           call={office.call}
           me={office.me}

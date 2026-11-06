@@ -3,6 +3,8 @@ export type UserSummary = {
   name: string;
   email: string;
   avatarColor: string;
+  /** Uploaded profile photo, versioned so it can be cached for good. Null shows initials. */
+  avatarUrl: string | null;
   title: string;
   statusEmoji: string;
   statusText: string;
@@ -69,6 +71,8 @@ export type CallParticipantView = {
   userId: string;
   name: string;
   avatarColor: string;
+  /** Uploaded profile photo for the call tile; omitted or null shows initials. */
+  avatarUrl?: string | null;
   muted: boolean;
   cameraOn: boolean;
   sharing: boolean;
@@ -205,6 +209,7 @@ export type TaskIssue = {
   commentCount: number;
   createdAt: string;
   updatedAt: string;
+  descriptionVersion: number;
 };
 
 export type TaskComment = {
@@ -225,6 +230,8 @@ export type TasksSnapshot = {
   issues: TaskIssue[];
   counts: {
     all: number;
+    /** Every issue outside the trash; larger than `all` when the list is capped. */
+    total: number;
     mine: number;
     byStatus: Record<string, number>;
   };
@@ -241,7 +248,9 @@ export type IssueEventKind =
   | 'parent'
   | 'start_date'
   | 'due_date'
-  | 'mentioned';
+  | 'mentioned'
+  | 'deleted'
+  | 'restored';
 
 /** One line of an issue's history. Values are already display text ("In Progress", "Amina Diallo"). */
 export type TaskEvent = {

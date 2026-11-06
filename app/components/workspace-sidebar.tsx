@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import {
   ChevronDown,
+  ShieldCheck,
   Hash,
   MessageSquarePlus,
   Plus,
@@ -14,6 +15,7 @@ import type { WorkspaceSnapshot } from '../lib/types';
 import { Avatar } from './avatar';
 import { AppRail } from './app-rail';
 import { cn } from '../utils/cn';
+import { MembersDialog } from './members-dialog';
 
 export function WorkspaceSidebar({
   snapshot,
@@ -41,6 +43,7 @@ export function WorkspaceSidebar({
   onSignOut: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
 
   return (
     <>
@@ -120,6 +123,14 @@ export function WorkspaceSidebar({
                   onClick={() => {
                     setMenuOpen(false);
                     onInvite();
+                  }}
+                />
+                <MenuItem
+                  icon={<ShieldCheck size={15} />}
+                  label="Members & roles"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setMembersOpen(true);
                   }}
                 />
                 <div className="my-1 h-px bg-sidebar-line" />
@@ -238,7 +249,7 @@ export function WorkspaceSidebar({
                     <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-coral" />
                   )}
                   <Avatar
-                    name={dm.peer?.name ?? 'Direct message'}
+                    name={dm.peer?.name ?? 'Direct message'} src={dm.peer?.avatarUrl}
                     color={dm.peer?.avatarColor ?? '#736f66'}
                     size="xs"
                     online={dm.peer?.online}
@@ -273,7 +284,7 @@ export function WorkspaceSidebar({
               {/* A1: the audit reads the avatar's centred initials as this button's text edge. */}
               <button type="button" onClick={onProfile} aria-label="Open profile" data-audit-skip="A1">
                 <Avatar
-                  name={snapshot.me.name}
+                  name={snapshot.me.name} src={snapshot.me.avatarUrl}
                   color={snapshot.me.avatarColor}
                   size="sm"
                   online
@@ -301,6 +312,11 @@ export function WorkspaceSidebar({
           </div>
         </div>
       </aside>
+      <MembersDialog
+        open={membersOpen}
+        onClose={() => setMembersOpen(false)}
+        workspaceId={snapshot.workspace.id}
+      />
     </>
   );
 }

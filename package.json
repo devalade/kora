@@ -4,14 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "start": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p realtime --noEmit",
+    "check:migrations": "node scripts/check-migrations.mjs",
     "db:generate": "void db generate",
     "db:migrate": "void db migrate",
     "db:seed": "void db seed",
-    "db:studio": "void db studio"
+    "db:studio": "void db studio",
+    "deploy": "npm run typecheck && npm run build && npm run check:migrations && void db migrate --remote && npm run deploy:realtime && void deploy --platform cloudflare",
+    "deploy:realtime": "wrangler deploy -c realtime/wrangler.jsonc"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.170.46",
@@ -35,6 +38,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261103.1",
     "@tailwindcss/vite": "4.3.4",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
@@ -45,7 +49,8 @@
     "tailwindcss": "4.3.4",
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
-    "void": "1.1.11"
+    "void": "1.1.11",
+    "wrangler": "^4.156.1"
   },
   "allowScripts": {
     "workerd@1.20261101.1": true,

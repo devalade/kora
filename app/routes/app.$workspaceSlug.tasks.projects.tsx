@@ -31,6 +31,7 @@ function ProjectsPage() {
   const [snapshot, setSnapshot] = useState<TasksSnapshot>(initial);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
   const [deleting, setDeleting] = useState<TaskProject | null>(null);
   const [removing, setRemoving] = useState(false);
 
@@ -217,6 +218,7 @@ function ProjectsPage() {
                   <div role="cell" className="hidden text-right text-[13px] tabular-nums text-muted md:block">
                     {project.issueCount}
                   </div>
+                  {isAdmin && (
                   <button
                     type="button"
                     onClick={() => setDeleting(project)}
@@ -226,6 +228,7 @@ function ProjectsPage() {
                   >
                     <Trash2 size={14} />
                   </button>
+                  )}
                 </div>
               ))}
             </div>

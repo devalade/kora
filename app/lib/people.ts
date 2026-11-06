@@ -29,11 +29,19 @@ type UserRow = {
   name: string;
   email: string;
   avatarColor: string;
+  avatarKey?: string | null;
   title: string;
   statusEmoji: string;
   statusText: string;
   lastSeenAt: string;
 };
+
+/** The URL changes whenever the photo does, so browsers may cache each version forever. */
+export function avatarUrlFor(userId: string, avatarKey: string | null | undefined) {
+  if (!avatarKey) return null;
+  const version = avatarKey.split('/').pop() ?? avatarKey;
+  return `/api/avatars/${encodeURIComponent(userId)}?v=${encodeURIComponent(version)}`;
+}
 
 export function toUserSummary(row: UserRow, now = Date.now()): UserSummary {
   return {
@@ -41,6 +49,7 @@ export function toUserSummary(row: UserRow, now = Date.now()): UserSummary {
     name: row.name,
     email: row.email,
     avatarColor: row.avatarColor,
+    avatarUrl: avatarUrlFor(row.id, row.avatarKey),
     title: row.title,
     statusEmoji: row.statusEmoji,
     statusText: row.statusText,

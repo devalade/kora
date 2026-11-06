@@ -1,6 +1,7 @@
 import { Check, ChevronDown } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../utils/cn';
+import { FloatingMenu } from './floating';
 
 export type PropertyOption = {
   value: string;
@@ -25,20 +26,6 @@ const triggerOpen: Record<PropertyVariant, string> = {
   row: 'bg-ink/[0.045]',
   chip: 'border-ink/25 bg-canvas',
 };
-
-/** Opens the menu above the trigger when there is not enough room below it. */
-export function useMenuPlacement(open: boolean, anchor: React.RefObject<HTMLElement | null>) {
-  const [up, setUp] = useState(false);
-  useLayoutEffect(() => {
-    if (!open || !anchor.current) return;
-    const rect = anchor.current.getBoundingClientRect();
-    setUp(window.innerHeight - rect.bottom < 320 && rect.top > window.innerHeight - rect.bottom);
-  }, [open, anchor]);
-  return up;
-}
-
-export const menuSurface =
-  'absolute z-50 w-max min-w-[220px] max-w-[300px] overflow-hidden rounded-lg border border-line/80 bg-paper shadow-[var(--kora-shadow-popover)]';
 
 export function PropertySelect({
   value,
@@ -84,7 +71,7 @@ export function PropertySelect({
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const up = useMenuPlacement(open, triggerRef);
+  const menuRef = useRef<HTMLDivElement>(null);
   const unset = unsetValue !== undefined && value === unsetValue;
   const selected = unset ? undefined : options.find((option) => option.value === value);
   const triggerIcon = selected?.icon ?? (unset ? options.find((o) => o.value === value)?.icon ?? emptyIcon : emptyIcon);
@@ -98,7 +85,9 @@ export function PropertySelect({
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return;
+      // The menu lives in a portal, so it counts as inside too.
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       setOpen(false);
     };
     document.addEventListener('pointerdown', onPointerDown);
@@ -199,14 +188,11 @@ export function PropertySelect({
       </button>
 
       {open && (
-        <div
-          className={cn(
-            menuSurface,
-            up ? 'bottom-full mb-1' : 'top-full mt-1',
-            variant === 'field' && 'w-full',
-            'popover-in',
-            menuClassName,
-          )}
+        <FloatingMenu
+          anchor={triggerRef}
+          menuRef={menuRef}
+          matchWidth={variant === 'field'}
+          className={cn('popover-in', menuClassName)}
         >
           {searchPlaceholder && (
             <input
@@ -229,7 +215,7 @@ export function PropertySelect({
             tabIndex={searchPlaceholder ? -1 : 0}
             onKeyDown={searchPlaceholder ? undefined : onMenuKey}
             aria-activedescendant={visible[active] ? `${listId}-${active}` : undefined}
-            className="max-h-[280px] overflow-y-auto p-1 outline-none"
+            className="max-h-[280px] min-h-0 overflow-y-auto p-1 outline-none"
           >
             {visible.length === 0 && (
               <p className="px-2 py-2 text-[13px] text-muted">No matches</p>
@@ -268,7 +254,7 @@ export function PropertySelect({
               );
             })}
           </div>
-        </div>
+        </FloatingMenu>
       )}
     </div>
   );

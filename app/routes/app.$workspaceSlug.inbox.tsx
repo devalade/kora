@@ -14,6 +14,7 @@ import { Avatar } from '../components/avatar';
 import { PRIORITY_META, TaskPriorityIcon, TaskStatusIcon } from '../components/task-icons';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
 import { fullDate, relativeTime } from '../lib/format';
+import { useLiveRefresh } from '../lib/realtime-client';
 import { getInboxFn, markInboxReadFn } from '../lib/inbox';
 import type { InboxItem } from '../lib/types';
 import { cn } from '../utils/cn';
@@ -22,7 +23,7 @@ type Filter = 'unread' | 'all';
 type Kind = 'everything' | 'tasks' | 'messages' | 'threads';
 
 const KIND_TABS: { value: Kind; label: string }[] = [
-  { value: 'everything', label: 'All' },
+  { value: 'everything', label: 'Everything' },
   { value: 'tasks', label: 'Tasks' },
   { value: 'messages', label: 'Messages' },
   { value: 'threads', label: 'Threads' },
@@ -104,29 +105,24 @@ function InboxPage() {
 
   const unread = useMemo(() => items.filter((item) => !item.readAt).length, [items]);
 
-  const refresh = useCallback(async () => {
-    if (document.hidden) return;
+  const refresh = useCallback(async (): Promise<string | null> => {
     const startedAt = mutations.current;
     try {
-      const result = await getInboxFn({ data: { slug: workspaceSlug } });
+      const result = await getInboxFn({ data: { slug: workspaceSlug, poll: true } });
       // A change made while this request was in flight is newer than the response.
-      if (startedAt !== mutations.current) return;
+      if (startedAt !== mutations.current) return null;
       setItems(result.items);
       setSyncError(false);
       publishInboxUnread(result.unread);
+      return `${result.unread}|${result.items.map((item) => `${item.id}${item.readAt ? 'r' : ''}`).join(',')}`;
     } catch {
       setSyncError(true);
+      return null;
     }
   }, [workspaceSlug]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => void refresh(), 5000);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', refresh);
-    };
-  }, [refresh]);
+  // New inbox items are pushed by the realtime socket; the list refetches when one arrives.
+  useLiveRefresh(workspaceSlug, refresh, (event) => event.t === 'inbox');
 
   const setRead = useCallback(
     async (target: { ids?: string[]; all?: boolean }, read: boolean) => {
@@ -393,7 +389,7 @@ function Row({
         aria-label={isUnread ? 'Unread' : undefined}
       />
       <Avatar
-        name={item.actor?.name ?? 'Someone'}
+        name={item.actor?.name ?? 'Someone'} src={item.actor?.avatarUrl}
         color={item.actor?.avatarColor ?? '#736f66'}
         size="sm"
       />
@@ -542,7 +538,7 @@ function Detail({
         <div className="mx-auto w-full max-w-[640px]">
           <div className="flex items-center gap-3">
             <Avatar
-              name={item.actor?.name ?? 'Someone'}
+              name={item.actor?.name ?? 'Someone'} src={item.actor?.avatarUrl}
               color={item.actor?.avatarColor ?? '#736f66'}
               size="md"
             />
@@ -589,7 +585,7 @@ function Detail({
                 <dd className="flex items-center gap-2 text-ink">
                   {issue.assignee ? (
                     <>
-                      <Avatar name={issue.assignee.name} color={issue.assignee.avatarColor} size="2xs" />
+                      <Avatar name={issue.assignee.name} src={issue.assignee.avatarUrl} color={issue.assignee.avatarColor} size="2xs" />
                       {issue.assignee.name}
                     </>
                   ) : (

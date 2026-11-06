@@ -164,7 +164,7 @@ function MessageRow({
         <div className="w-9 shrink-0 pt-0.5">
           {!grouped && (
             <Avatar
-              name={message.author.name}
+              name={message.author.name} src={message.author.avatarUrl}
               color={message.author.avatarColor}
               size="md"
               online={message.author.online}

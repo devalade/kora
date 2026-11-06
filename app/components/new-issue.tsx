@@ -1,6 +1,7 @@
 import { useNavigate, useRouter } from '@tanstack/react-router';
 import { AlertCircle, ChevronRight, Loader2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import {
   closeNewIssue,
@@ -339,9 +340,9 @@ export function NewIssueModal({ snapshot }: { snapshot: TasksSnapshot }) {
     };
   }, [state.open]);
 
-  if (!state.open) return null;
+  if (!state.open || typeof document === 'undefined') return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink/25 sm:items-start sm:px-6 sm:pt-[12vh]"
       onMouseDown={(event) => {
@@ -371,6 +372,7 @@ export function NewIssueModal({ snapshot }: { snapshot: TasksSnapshot }) {
           }}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

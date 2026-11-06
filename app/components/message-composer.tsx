@@ -875,7 +875,7 @@ export function MessageComposer({
                     )}
                   >
                     <Avatar
-                      name={person.name}
+                      name={person.name} src={person.avatarUrl}
                       color={person.avatarColor}
                       size="sm"
                       online={person.online}

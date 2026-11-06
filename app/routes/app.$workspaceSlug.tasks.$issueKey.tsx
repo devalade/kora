@@ -6,6 +6,7 @@ import {
   useRouter,
   type ErrorComponentProps,
 } from '@tanstack/react-router';
+import { useLiveRefresh } from '../lib/realtime-client';
 import {
   ArrowUp,
   Check,
@@ -23,7 +24,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
 import {
@@ -31,6 +32,7 @@ import {
   setIssueTypingFn,
   createIssueFn,
   deleteIssueFn,
+  restoreIssueFn,
   getIssueFn,
   getTasksFn,
   touchIssueEditorFn,
@@ -59,7 +61,8 @@ import {
 import { MarkdownEditor } from '../components/markdown-editor';
 import { Modal } from '../components/modal';
 import { NewIssueModal } from '../components/new-issue';
-import { menuSurface, PropertySelect, type PropertyOption } from '../components/property-select';
+import { PropertySelect, type PropertyOption } from '../components/property-select';
+import { FloatingMenu } from '../components/floating';
 import { TaskPriorityIcon, TaskStatusIcon } from '../components/task-icons';
 import { TasksSidebar } from '../components/tasks-sidebar';
 import { TypingRow } from '../components/message-list';
@@ -118,6 +121,12 @@ function IssuePage() {
   const [addingSubIssue, setAddingSubIssue] = useState(false);
   const descriptionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestIssueRef = useRef(initialDetail.issue);
+  // The description version this editor's text is based on; saves send it so edits never clobber.
+  const descriptionBase = useRef(initialDetail.issue.descriptionVersion);
+  const [descriptionConflict, setDescriptionConflict] = useState<{
+    description: string;
+    version: number;
+  } | null>(null);
 
   const issue = detail.issue;
   latestIssueRef.current = issue;
@@ -141,44 +150,47 @@ function IssuePage() {
       }
     };
     ping();
-    const timer = setInterval(ping, 4000);
-    return () => clearInterval(timer);
+    // A heartbeat that keeps this person listed as viewing (the server window is 50 s). Arrivals and
+    // departures are pushed to others; the heartbeat itself is not.
+    const timer = setInterval(ping, 20_000);
+    return () => {
+      clearInterval(timer);
+      void touchIssueEditorFn({ data: { issueId: issue.id, leave: true } }).catch(() => undefined);
+    };
   }, [issue.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      if (document.visibilityState !== 'visible') return;
-      try {
-        const next = await getIssueFn({
-          data: { slug: snapshot.workspace.slug, issueKey: issue.key },
-        });
-        if (cancelled) return;
-        const active = document.activeElement;
-        const editingDescription = Boolean(active?.closest('.tiptap'));
-        const editingTitle =
-          active instanceof HTMLInputElement && active.getAttribute('aria-label') === 'Issue title';
-        setDetail((current) => ({
-          ...next,
-          issue: {
-            ...next.issue,
-            description: editingDescription ? current.issue.description : next.issue.description,
-          },
-        }));
-        if (!editingDescription && !descriptionTimer.current) {
-          setDescription(next.issue.description);
-        }
-        if (!editingTitle) setTitle(next.issue.title);
-      } catch {
-        // The next poll recovers a dropped read.
+  const refreshIssue = useCallback(async () => {
+    try {
+      const next = await getIssueFn({
+        data: { slug: snapshot.workspace.slug, issueKey: issue.key },
+      });
+      if (latestIssueRef.current?.id !== issue.id) return;
+      const active = document.activeElement;
+      const editingDescription = Boolean(active?.closest('.tiptap'));
+      const editingTitle =
+        active instanceof HTMLInputElement && active.getAttribute('aria-label') === 'Issue title';
+      setDetail((current) => ({
+        ...next,
+        issue: {
+          ...next.issue,
+          description: editingDescription ? current.issue.description : next.issue.description,
+        },
+      }));
+      if (!editingDescription && !descriptionTimer.current) {
+        setDescription(next.issue.description);
+        descriptionBase.current = next.issue.descriptionVersion;
       }
-    };
-    const timer = setInterval(refresh, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
+      if (!editingTitle) setTitle(next.issue.title);
+    } catch {
+      // The next event or reconnect refetches.
+    }
   }, [issue.id, issue.key, snapshot.workspace.slug]);
+
+  // Pushed: any issue change in the workspace (this one, a sub-issue, the workflow) and anyone
+  // arriving, leaving or typing here.
+  useLiveRefresh(snapshot.workspace.slug, refreshIssue, (event) =>
+    event.t === 'issue' || (event.t === 'editors' && event.i === issue.id),
+  );
 
   function applyPatch(current: TaskIssue, patch: IssuePatch): TaskIssue {
     return {
@@ -250,11 +262,46 @@ function IssuePage() {
     else setTitle(next);
   }
 
-  async function persistDescription(next: string) {
+  async function persistDescription(next: string, baseVersion = descriptionBase.current) {
     const before = latestIssueRef.current.description;
-    if (next === before) return;
-    const saved = await patchIssue({ description: next });
-    if (!saved) setDescription(before);
+    if (next === before && baseVersion === descriptionBase.current) return;
+    setSaving(true);
+    try {
+      const result = await updateIssueFn({
+        data: { issueId: issue.id, description: next, descriptionBaseVersion: baseVersion },
+      });
+      if (!result.ok) {
+        // A teammate saved first. Keep this text in the editor and let the person choose.
+        setDescriptionConflict(result.conflict);
+        return;
+      }
+      if (result.descriptionVersion !== undefined) descriptionBase.current = result.descriptionVersion;
+      setDescriptionConflict(null);
+      setDetail((current) => ({
+        ...current,
+        issue: {
+          ...current.issue,
+          description: next,
+          descriptionVersion: result.descriptionVersion ?? current.issue.descriptionVersion,
+        },
+      }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save the description.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function useTheirDescription() {
+    if (!descriptionConflict) return;
+    descriptionBase.current = descriptionConflict.version;
+    setDescription(descriptionConflict.description);
+    setDescriptionConflict(null);
+  }
+
+  function keepMyDescription() {
+    if (!descriptionConflict) return;
+    void persistDescription(description, descriptionConflict.version);
   }
 
   function handleDescriptionChange(next: string) {
@@ -361,7 +408,26 @@ function IssuePage() {
     setDeleting(true);
     try {
       await deleteIssueFn({ data: { issueId: issue.id } });
-      toast.success('Issue deleted.');
+      const deletedId = issue.id;
+      const deletedKey = issue.key;
+      toast.success(`${deletedKey} moved to the trash.`, {
+        duration: 8000,
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            void restoreIssueFn({ data: { issueId: deletedId } })
+              .then(() =>
+                navigate({
+                  to: '/app/$workspaceSlug/tasks/$issueKey',
+                  params: { workspaceSlug: params.workspaceSlug, issueKey: deletedKey },
+                }),
+              )
+              .catch((error: unknown) =>
+                toast.error(error instanceof Error ? error.message : 'Could not restore the issue.'),
+              );
+          },
+        },
+      });
       navigate({
         to: '/app/$workspaceSlug/tasks',
         params: { workspaceSlug: params.workspaceSlug },
@@ -402,6 +468,8 @@ function IssuePage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [issue.team.id]);
 
+  const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
+  const canDelete = isAdmin || detail.createdBy?.id === snapshot.me.id;
   const otherEditors = detail.editors.filter((editor) => editor.id !== snapshot.me.id);
   const otherTyping = detail.commentTyping.filter((person) => person.id !== snapshot.me.id);
   const overdue =
@@ -551,7 +619,7 @@ function IssuePage() {
                   .catch(() => toast.error('Copy failed.'));
               }}
               onCopyLink={() => void copyLink()}
-              onDelete={() => setDeleteOpen(true)}
+              onDelete={canDelete ? () => setDeleteOpen(true) : undefined}
             />
           </div>
         </header>
@@ -587,6 +655,34 @@ function IssuePage() {
                   variant="chip"
                 />
               </div>
+
+              {descriptionConflict && (
+                <div
+                  role="alert"
+                  className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-gold/50 bg-gold/10 px-3 py-2 text-[13px] text-ink-soft"
+                >
+                  <span className="min-w-0 flex-1">
+                    A teammate changed this description while you were editing. Your text is still
+                    here; nothing was saved over theirs.
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={useTheirDescription}
+                      className="h-8 rounded-md px-2.5 text-[12px] font-medium text-ink-soft hover:bg-ink/[0.06]"
+                    >
+                      Use theirs
+                    </button>
+                    <button
+                      type="button"
+                      onClick={keepMyDescription}
+                      className="h-8 rounded-md bg-ink px-2.5 text-[12px] font-medium text-paper hover:bg-ink-soft"
+                    >
+                      Keep mine
+                    </button>
+                  </span>
+                </div>
+              )}
 
               <div className="mt-3">
                 <MarkdownEditor
@@ -639,7 +735,7 @@ function IssuePage() {
                       >
                         <div className="flex items-center gap-2">
                           <Avatar
-                            name={entry.comment.author.name}
+                            name={entry.comment.author.name} src={entry.comment.author.avatarUrl}
                             color={entry.comment.author.avatarColor}
                             size="2xs"
                           />
@@ -762,7 +858,7 @@ function IssuePage() {
         onClose={() => setDeleteOpen(false)}
         width="max-w-md"
         title="Delete this issue?"
-        description={`${issue.key} and its comments will be removed. This cannot be undone.`}
+        description={`${issue.key} moves to the trash with its comments and history. You can restore it for 30 days.`}
       >
         <div className="flex items-center justify-end gap-2">
           <button
@@ -830,6 +926,10 @@ function historySentence(event: TaskEvent): React.ReactNode {
       return event.to ? <>set the due date to {strong(date(event.to))}</> : 'removed the due date';
     case 'mentioned':
       return event.to ? <>mentioned this issue in {strong(event.to)}</> : 'mentioned this issue';
+    case 'deleted':
+      return 'moved the issue to the trash';
+    case 'restored':
+      return 'restored the issue from the trash';
     default:
       return 'updated the issue';
   }
@@ -871,7 +971,7 @@ function HistoryLine({ event }: { event: TaskEvent }) {
     <li className="flex items-start gap-2 pl-1 text-[13px] leading-5 text-muted">
       <span className="grid size-5 shrink-0 place-items-center">
         {event.actor ? (
-          <Avatar name={event.actor.name} color={event.actor.avatarColor} size="2xs" />
+          <Avatar name={event.actor.name} src={event.actor.avatarUrl} color={event.actor.avatarColor} size="2xs" />
         ) : (
           <CircleDot size={12} className="text-faint" />
         )}
@@ -1104,7 +1204,7 @@ function SubIssues({
               </span>
               <TaskPriorityIcon priority={child.priority} size={14} />
               {child.assignee ? (
-                <Avatar name={child.assignee.name} color={child.assignee.avatarColor} size="2xs" />
+                <Avatar name={child.assignee.name} src={child.assignee.avatarUrl} color={child.assignee.avatarColor} size="2xs" />
               ) : (
                 <span className="size-5" />
               )}
@@ -1164,15 +1264,19 @@ function IssueMenu({
 }: {
   onCopyLink: () => void;
   onCopyId: () => void;
-  onDelete: () => void;
+  /** Missing when the viewer may not delete this issue (only its creator or an admin may). */
+  onDelete?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
@@ -1196,6 +1300,7 @@ function IssueMenu({
   return (
     <div ref={rootRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-label="More actions"
@@ -1209,23 +1314,29 @@ function IssueMenu({
         <MoreHorizontal size={16} />
       </button>
       {open && (
-        <div role="menu" className={cn(menuSurface, 'top-full right-0 mt-1 p-1', 'popover-in')}>
+        <FloatingMenu anchor={triggerRef} menuRef={menuRef} align="end" className="popover-in">
+          <div role="menu" className="p-1">
           <button type="button" role="menuitem" className={item} onClick={() => run(onCopyLink)}>
             <Link2 size={14} className="text-muted" /> Copy link
           </button>
           <button type="button" role="menuitem" className={item} onClick={() => run(onCopyId)}>
             <Hash size={14} className="text-muted" /> Copy issue ID
           </button>
-          <div className="my-1 h-px bg-line-soft" />
-          <button
-            type="button"
-            role="menuitem"
-            className={cn(item, 'text-danger hover:bg-danger/[0.07] hover:text-danger')}
-            onClick={() => run(onDelete)}
-          >
-            <Trash2 size={14} /> Delete issue…
-          </button>
-        </div>
+          {onDelete && (
+            <>
+              <div className="my-1 h-px bg-line-soft" />
+              <button
+                type="button"
+                role="menuitem"
+                className={cn(item, 'text-danger hover:bg-danger/[0.07] hover:text-danger')}
+                onClick={() => run(onDelete)}
+              >
+                <Trash2 size={14} /> Delete issue…
+              </button>
+            </>
+          )}
+          </div>
+        </FloatingMenu>
       )}
     </div>
   );

@@ -40,7 +40,11 @@ import { MessageList } from '../components/message-list';
 import { ThreadPanel } from '../components/thread-panel';
 import { WorkspaceSidebar } from '../components/workspace-sidebar';
 import { relativeTime } from '../lib/format';
+import { useLiveRefresh } from '../lib/realtime-client';
 import { cn } from '../utils/cn';
+
+/** A little longer than the server's typing window (TYPING_WINDOW_MS in chat.ts). */
+const TYPING_LAPSE_MS = 5_500;
 
 export const Route = createFileRoute('/app/$workspaceSlug/$channelId')({
   beforeLoad: async () => {
@@ -55,6 +59,44 @@ export const Route = createFileRoute('/app/$workspaceSlug/$channelId')({
   head: () => ({ meta: [{ title: 'Kora · Team chat' }] }),
   component: WorkspacePage,
 });
+
+/**
+ * A short fingerprint of what a viewer can see change: messages and their reactions, replies and
+ * files, who is typing, the huddle, unread badges and the channel lists. Presence is left out on
+ * purpose, since it moves constantly and should not keep the poll at full speed.
+ */
+function snapshotToken(next: WorkspaceSnapshot) {
+  const parts: (string | number | boolean | null)[] = [
+    next.channel?.id ?? null,
+    next.hasMore,
+    next.channels.length,
+    next.dms.length,
+    next.channelMembers.length,
+  ];
+  for (const message of next.messages) {
+    parts.push(
+      message.id,
+      message.editedAt,
+      message.deletedAt,
+      message.replyCount,
+      message.lastReplyAt,
+      message.attachments.length,
+      message.reactions.map((reaction) => `${reaction.emoji}${reaction.count}${reaction.mine ? '*' : ''}`).join(','),
+      message.issues.map((issue) => `${issue.key}${issue.status.id}`).join(','),
+    );
+  }
+  parts.push(next.typing.map((person) => person.id).join(','));
+  if (next.call) {
+    parts.push(
+      next.call.id,
+      next.call.participants
+        .map((p) => `${p.userId}${p.muted ? 'm' : ''}${p.cameraOn ? 'c' : ''}${p.sharing ? 's' : ''}`)
+        .join(','),
+    );
+  }
+  for (const item of [...next.channels, ...next.dms]) parts.push(item.id, item.unread, item.mentions);
+  return parts.join('|');
+}
 
 function WorkspacePage() {
   const initial = Route.useLoaderData();
@@ -98,7 +140,7 @@ function WorkspacePage() {
     [snapshot.channels],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<string | null> => {
     const requestId = ++requestRef.current;
     const target = { slug: params.workspaceSlug, channelId: params.channelId };
     try {
@@ -118,10 +160,12 @@ function WorkspacePage() {
         ) {
           void markReadFn({ data: { channelId: next.channel.id } });
         }
+        return snapshotToken(next);
       }
     } catch {
       // A dropped poll is recovered by the next tick.
     }
+    return null;
   }, [params.workspaceSlug, params.channelId]);
 
   useEffect(() => {
@@ -145,23 +189,19 @@ function WorkspacePage() {
     lastMessageId.current = null;
   }, [initial]);
 
+  // Pushed, not polled: the realtime socket says when a message, reaction, typing, huddle, channel or
+  // presence changed in this workspace, and the page refetches its snapshot (sidebar badges included).
+  useLiveRefresh(params.workspaceSlug, load, (event) =>
+    ['chat', 'typing', 'call', 'read', 'workspace', 'presence', 'grants'].includes(event.t),
+  );
+
+  // Typing indicators expire on the server after a few quiet seconds; refetch once when they lapse.
+  const typingKey = snapshot.typing.map((person) => person.id).join(',');
   useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState === 'visible') void load();
-    };
-    tick();
-    const timer = setInterval(tick, 2000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void load();
-    };
-    window.addEventListener('focus', onVisible);
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('focus', onVisible);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [load]);
+    if (!typingKey) return;
+    const timer = setTimeout(() => void load(), TYPING_LAPSE_MS);
+    return () => clearTimeout(timer);
+  }, [typingKey, load]);
 
   useEffect(() => {
     if (!channel) return;
@@ -203,9 +243,16 @@ function WorkspacePage() {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [params.channelId]);
 
+  // Close the room when the call ends, but only once this page has seen the call: right after joining,
+  // a refetch started before the join can still land and briefly show no call.
+  const sawCall = useRef(false);
   useEffect(() => {
-    if (snapshot.call && callOpen) return;
-    if (!snapshot.call && callOpen) setCallOpen(false);
+    if (!callOpen) {
+      sawCall.current = false;
+      return;
+    }
+    if (snapshot.call) sawCall.current = true;
+    else if (sawCall.current) setCallOpen(false);
   }, [snapshot.call, callOpen]);
 
   useEffect(() => {
@@ -378,7 +425,7 @@ function WorkspacePage() {
             </button>
             {channel.kind === 'dm' ? (
               <Avatar
-                name={peer?.name ?? 'Direct message'}
+                name={peer?.name ?? 'Direct message'} src={peer?.avatarUrl}
                 color={peer?.avatarColor ?? '#736f66'}
                 size="md"
                 online={peer?.online}
@@ -468,7 +515,8 @@ function WorkspacePage() {
               }}
               className="scroll-thin flex min-h-0 flex-1 flex-col-reverse overflow-y-auto"
             >
-              <div className="mx-auto max-w-[980px]">
+              {/* shrink-0: as a flex item the column would otherwise squeeze to the viewport and never scroll. */}
+              <div className="mx-auto w-full max-w-[980px] shrink-0">
                 <ChannelIntro
                   snapshot={snapshot}
                   peer={peer ?? null}
@@ -535,6 +583,7 @@ function WorkspacePage() {
           {threadId ? (
             <ThreadPanel
               key={threadId}
+              workspaceSlug={params.workspaceSlug}
               messageId={threadId}
               channelName={channelLabel}
               members={snapshot.members}
@@ -600,6 +649,7 @@ function WorkspacePage() {
 
       {callOpen && snapshot.call && (
         <CallRoom
+          workspaceSlug={params.workspaceSlug}
           key={snapshot.call.id}
           call={snapshot.call}
           me={snapshot.me}
@@ -648,7 +698,7 @@ function ChannelIntro({
     <div className="px-5 pt-8">
       {peer ? (
         <div className="flex items-center gap-4">
-          <Avatar name={peer.name} color={peer.avatarColor} size="2xl" online={peer.online} />
+          <Avatar name={peer.name} src={peer.avatarUrl} color={peer.avatarColor} size="2xl" online={peer.online} />
           <div>
             <h2 className="text-2xl font-semibold tracking-[-0.03em]">{peer.name}</h2>
             <p className="mt-1 text-sm text-muted">
@@ -750,7 +800,7 @@ function MemberGroup({
           onClick={() => onOpenDm(member.id)}
           className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-canvas"
         >
-          <Avatar name={member.name} color={member.avatarColor} size="sm" online={member.online} />
+          <Avatar name={member.name} src={member.avatarUrl} color={member.avatarColor} size="sm" online={member.online} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium">{member.name}</span>
             <span className="block truncate text-[10px] text-faint">

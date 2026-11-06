@@ -35,6 +35,17 @@ export async function requireWorkspace(workspaceId: string, userId: string) {
   return row;
 }
 
+export function isAdminRole(role: string) {
+  return role === 'owner' || role === 'admin';
+}
+
+/** Workflow, labels, teams and project deletion change things for everyone: admins only. */
+export async function requireAdmin(workspaceId: string, userId: string, action: string) {
+  const membership = await requireWorkspace(workspaceId, userId);
+  if (!isAdminRole(membership.role)) throw new Error(`Only workspace admins can ${action}.`);
+  return membership;
+}
+
 export async function requireChannel(channelId: string, userId: string) {
   const rows = await db
     .select({
@@ -81,6 +92,7 @@ export async function memberUsers(workspaceId: string) {
       name: users.name,
       email: users.email,
       avatarColor: users.avatarColor,
+      avatarKey: users.avatarKey,
       title: users.title,
       statusEmoji: users.statusEmoji,
       statusText: users.statusText,

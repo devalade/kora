@@ -76,6 +76,10 @@ function PreviewCard({ url }: { url: string }) {
   }
 
   const showImage = Boolean(preview.imageUrl) && !imageBroken;
+  // The image loads through Kora, never from the linked site, so the poster cannot see who read the message.
+  const imageSrc = preview.imageUrl
+    ? `/api/link-preview-image?url=${encodeURIComponent(preview.imageUrl)}&page=${encodeURIComponent(preview.url)}`
+    : '';
   return (
     <a
       href={preview.url}
@@ -101,7 +105,7 @@ function PreviewCard({ url }: { url: string }) {
       {showImage && (
         <span className="relative w-[112px] shrink-0 self-stretch overflow-hidden border-l border-line/70 bg-canvas sm:w-[168px]">
           <img
-            src={preview.imageUrl ?? ''}
+            src={imageSrc}
             alt=""
             loading="lazy"
             referrerPolicy="no-referrer"

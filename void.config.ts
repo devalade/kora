@@ -7,5 +7,8 @@ export default defineConfig({
   },
   cloudflare: {
     routes: [{ pattern: 'kora.zecreator.com', custom_domain: true }],
+    // Match the live Worker: its workers.dev address and preview URLs are on.
+    workers_dev: true,
+    preview_urls: true,
   },
 });

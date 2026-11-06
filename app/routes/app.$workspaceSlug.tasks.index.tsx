@@ -1,4 +1,5 @@
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
+import { useLiveRefresh } from '../lib/realtime-client';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight,
@@ -27,7 +28,7 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
-import { createIssueFn, getTasksFn, updateIssueFn } from '../lib/tasks';
+import { createIssueFn, getTasksFn, searchTasksFn, updateIssueFn } from '../lib/tasks';
 import type { TaskIssue, TaskStatus, TasksSnapshot } from '../lib/types';
 import {
   validateTasksSearch,
@@ -76,6 +77,8 @@ function TasksPage() {
   const navigate = useNavigate();
   const [snapshot, setSnapshot] = useState<TasksSnapshot>(initial);
   const [query, setQuery] = useState('');
+  // Matches for the typed query from the whole workspace, used when the list is capped.
+  const [serverMatches, setServerMatches] = useState<TaskIssue[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -111,9 +114,42 @@ function TasksPage() {
     ? snapshot.statuses.find((status) => status.id === statusFilter) ?? null
     : null;
 
+  const capped = snapshot.counts.total > snapshot.counts.all;
+  const searchSlug = params.workspaceSlug;
+
+  // The list holds only the most recently updated issues. While it is capped, a typed query also
+  // asks the server (debounced) so older issues can be found. `cancelled` drops a stale response.
+  useEffect(() => {
+    const text = query.trim();
+    if (!capped || !text) {
+      setServerMatches((current) => (current.length === 0 ? current : []));
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchTasksFn({ data: { slug: searchSlug, query: text } })
+        .then((found) => {
+          if (!cancelled) setServerMatches(found);
+        })
+        .catch(() => {
+          // The loaded list still filters locally; the next keystroke retries.
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [capped, query, searchSlug]);
+
+  const searchPool = useMemo(() => {
+    if (!capped || !query.trim() || serverMatches.length === 0) return snapshot.issues;
+    const loaded = new Set(snapshot.issues.map((issue) => issue.id));
+    return [...snapshot.issues, ...serverMatches.filter((issue) => !loaded.has(issue.id))];
+  }, [capped, query, serverMatches, snapshot.issues]);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return snapshot.issues.filter((issue) => {
+    return searchPool.filter((issue) => {
       if (view === 'mine' && issue.assignee?.id !== me.id) return false;
       if (teamFilter && issue.team.id !== teamFilter) return false;
       if (projectFilter && issue.project?.id !== projectFilter) return false;
@@ -125,7 +161,7 @@ function TasksPage() {
       }
       return true;
     });
-  }, [snapshot.issues, view, me.id, teamFilter, projectFilter, labelFilter, statusFilter, query]);
+  }, [searchPool, view, me.id, teamFilter, projectFilter, labelFilter, statusFilter, query]);
 
   const grouped = useMemo(() => {
     const groups = snapshot.statuses
@@ -216,21 +252,9 @@ function TasksPage() {
     }
   }, [collapseKey, collapseStateLoaded, collapsedStatuses]);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void loadSnapshot();
-    }, 5000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void loadSnapshot();
-    };
-    window.addEventListener('focus', onVisible);
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('focus', onVisible);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [loadSnapshot]);
+  // Any issue, workflow, label, project or role change in the workspace is pushed by the realtime
+  // socket; the list refetches then.
+  useLiveRefresh(params.workspaceSlug, loadSnapshot, (event) => event.t === 'issue' || event.t === 'workspace');
 
   useEffect(() => {
     if (statusFilter && !snapshot.statuses.some((status) => status.id === statusFilter)) {
@@ -631,6 +655,15 @@ function TasksPage() {
             <kbd className="ml-2 task-kbd">⌘K</kbd> commands
           </span>
         </div>
+        {capped && (
+          <p
+            role="status"
+            className="shrink-0 border-b border-line/70 bg-gold/10 px-4 py-2 text-[12px] text-ink-soft sm:px-6"
+          >
+            Showing the {snapshot.counts.all} most recently updated issues of {snapshot.counts.total}.
+            Search covers every issue, and you can open any of them by its key, like KOR-12.
+          </p>
+        )}
 
         {view === 'board' ? (
           <BoardView
@@ -1002,7 +1035,7 @@ function IssueList({
                 </span>
                 {issue.assignee ? (
                   <Avatar
-                    name={issue.assignee.name}
+                    name={issue.assignee.name} src={issue.assignee.avatarUrl}
                     color={issue.assignee.avatarColor}
                     size="xs"
                   />
@@ -1348,7 +1381,7 @@ function TimelineView({
                     </span>
                     {issue.assignee ? (
                       <Avatar
-                        name={issue.assignee.name}
+                        name={issue.assignee.name} src={issue.assignee.avatarUrl}
                         color={issue.assignee.avatarColor}
                         size="xs"
                       />
@@ -1522,7 +1555,7 @@ function BoardView({
                       <SubIssueBadge issue={issue} className="text-[11px]" />
                       {issue.assignee ? (
                         <Avatar
-                          name={issue.assignee.name}
+                          name={issue.assignee.name} src={issue.assignee.avatarUrl}
                           color={issue.assignee.avatarColor}
                           size="xs"
                         />

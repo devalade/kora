@@ -67,7 +67,7 @@ export const IssueEmbed = memo(function IssueEmbed({
       <TaskPriorityIcon priority={issue.priority} size={14} />
       {issue.assignee ? (
         <span title={issue.assignee.name} className="shrink-0">
-          <Avatar name={issue.assignee.name} color={issue.assignee.avatarColor} size="xs" />
+          <Avatar name={issue.assignee.name} src={issue.assignee.avatarUrl} color={issue.assignee.avatarColor} size="xs" />
         </span>
       ) : (
         <span

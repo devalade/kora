@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getThreadFn, sendMessageFn, setTypingFn, toggleReactionFn } from '../lib/chat';
 import type { MessageView, ThreadView, UserSummary } from '../lib/types';
@@ -10,10 +10,28 @@ import { IssueEmbeds } from './issue-embed';
 import { MessageLinkPreviews } from './link-preview';
 import { TypingRow } from './message-list';
 import { RichText } from './rich-text';
+import { useLiveRefresh } from '../lib/realtime-client';
 import { useDisplayTimeZone } from '../lib/use-display-time-zone';
 import { cn } from '../utils/cn';
 
+/** Changes when a reply, reaction, file or typing indicator changes; presence is ignored. */
+function threadToken(thread: ThreadView) {
+  return [thread.parent, ...thread.replies]
+    .map((message) =>
+      [
+        message.id,
+        message.editedAt,
+        message.deletedAt,
+        message.attachments.length,
+        message.reactions.map((reaction) => `${reaction.emoji}${reaction.count}`).join(','),
+      ].join(':'),
+    )
+    .concat(thread.typing.map((person) => person.id).join(','))
+    .join('|');
+}
+
 export function ThreadPanel({
+  workspaceSlug,
   messageId,
   channelName,
   members,
@@ -22,6 +40,7 @@ export function ThreadPanel({
   onChanged,
   onMentionClick,
 }: {
+  workspaceSlug: string;
   messageId: string;
   channelName: string;
   members?: UserSummary[];
@@ -35,29 +54,37 @@ export function ThreadPanel({
   const requestRef = useRef(0);
   const typingSentAt = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      const request = ++requestRef.current;
-      try {
-        const next = await getThreadFn({ data: { messageId } });
-        if (!cancelled && request === requestRef.current) {
-          setThread(next);
-          setError(null);
-        }
-      } catch (caught) {
-        if (!cancelled && request === requestRef.current) {
-          setError(caught instanceof Error ? caught.message : 'Thread not found.');
-        }
+  // The panel is keyed by thread, so `messageId` is stable for the life of the component's polling.
+  const poll = useCallback(async (): Promise<string | null> => {
+    const request = ++requestRef.current;
+    try {
+      const next = await getThreadFn({ data: { messageId } });
+      if (request !== requestRef.current) return null;
+      setThread(next);
+      setError(null);
+      return threadToken(next);
+    } catch (caught) {
+      if (request === requestRef.current) {
+        setError(caught instanceof Error ? caught.message : 'Thread not found.');
       }
+      return null;
     }
-    void load();
-    const timer = setInterval(load, 2500);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
   }, [messageId]);
+
+  // First paint, then refetch whenever the realtime socket reports a change in this channel.
+  useEffect(() => {
+    void poll();
+  }, [poll]);
+  const channelId = thread?.parent?.channelId ?? null;
+  useLiveRefresh(workspaceSlug, poll, (event) =>
+    (event.t === 'chat' || event.t === 'typing') && event.c === channelId,
+  );
+  const typingKey = thread?.typing.map((person) => person.id).join(',') ?? '';
+  useEffect(() => {
+    if (!typingKey) return;
+    const timer = setTimeout(() => void poll(), 5_500);
+    return () => clearTimeout(timer);
+  }, [typingKey, poll]);
 
   async function refresh() {
     const request = ++requestRef.current;
@@ -187,7 +214,7 @@ function ThreadMessage({
   const timeZone = useDisplayTimeZone();
   return (
     <article className={cn('flex gap-3', large && 'rounded-2xl bg-canvas p-3')}>
-      <Avatar name={message.author.name} color={message.author.avatarColor} size={large ? 'md' : 'sm'} />
+      <Avatar name={message.author.name} src={message.author.avatarUrl} color={message.author.avatarColor} size={large ? 'md' : 'sm'} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-[13.5px] font-semibold">{message.author.name}</span>

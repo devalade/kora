@@ -34,8 +34,9 @@ import { readSessionUser } from './session';
 import { issueIdsForKeys, issueKeysIn, issueSubscribers, notify, recordIssueEvent } from './activity';
 import { newId, newInviteCode, slugify } from './ids';
 import { mentionHandle, mentionLookup } from './mentions';
-import { toUserSummary } from './people';
+import { avatarUrlFor, toUserSummary } from './people';
 import { memberUsers, requireChannel, requireUser, requireWorkspace, touchPresence } from './server';
+import { publish, toChannel, toUser, toWorkspace } from './realtime';
 import type {
   CallView,
   ChannelSummary,
@@ -53,12 +54,14 @@ import type {
 
 const LIVE_WINDOW_MS = 75_000;
 const TYPING_WINDOW_MS = 5_000;
+const PRESENCE_REFRESH_MS = 20_000;
 
 const userSelection = {
   id: users.id,
   name: users.name,
   email: users.email,
   avatarColor: users.avatarColor,
+  avatarKey: users.avatarKey,
   title: users.title,
   statusEmoji: users.statusEmoji,
   statusText: users.statusText,
@@ -78,6 +81,7 @@ type MessageBase = {
   authorName: string;
   authorEmail: string;
   authorAvatarColor: string;
+  authorAvatarKey: string | null;
   authorTitle: string;
   authorStatusEmoji: string;
   authorStatusText: string;
@@ -96,6 +100,7 @@ const messageSelection = {
   authorName: users.name,
   authorEmail: users.email,
   authorAvatarColor: users.avatarColor,
+  authorAvatarKey: users.avatarKey,
   authorTitle: users.title,
   authorStatusEmoji: users.statusEmoji,
   authorStatusText: users.statusText,
@@ -108,6 +113,7 @@ function authorOf(row: MessageBase): UserSummary {
     name: row.authorName,
     email: row.authorEmail,
     avatarColor: row.authorAvatarColor,
+    avatarUrl: avatarUrlFor(row.authorId, row.authorAvatarKey),
     title: row.authorTitle,
     statusEmoji: row.authorStatusEmoji,
     statusText: row.authorStatusText,
@@ -194,6 +200,7 @@ async function issueRefsForMessages(rows: MessageBase[]) {
             assigneeName: users.name,
             assigneeEmail: users.email,
             assigneeAvatarColor: users.avatarColor,
+            assigneeAvatarKey: users.avatarKey,
             assigneeTitle: users.title,
             assigneeStatusEmoji: users.statusEmoji,
             assigneeStatusText: users.statusText,
@@ -203,7 +210,7 @@ async function issueRefsForMessages(rows: MessageBase[]) {
           .innerJoin(teams, eq(teams.id, issues.teamId))
           .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
           .leftJoin(users, eq(users.id, issues.assigneeId))
-          .where(and(eq(issues.workspaceId, workspaceId), or(...pairs)))
+          .where(and(eq(issues.workspaceId, workspaceId), isNull(issues.deletedAt), or(...pairs)))
           .then((found) => {
             for (const row of found) {
               const key = `${row.teamKey}-${row.number}`;
@@ -226,6 +233,7 @@ async function issueRefsForMessages(rows: MessageBase[]) {
                         name: row.assigneeName ?? '',
                         email: row.assigneeEmail ?? '',
                         avatarColor: row.assigneeAvatarColor ?? '',
+                        avatarKey: row.assigneeAvatarKey,
                         title: row.assigneeTitle ?? '',
                         statusEmoji: row.assigneeStatusEmoji ?? '',
                         statusText: row.assigneeStatusText ?? '',
@@ -351,107 +359,91 @@ async function hydrateMessages(rows: MessageBase[], viewerId: string): Promise<M
   });
 }
 
-async function channelSummaries(
-  workspaceId: string,
-  viewerId: string,
-  memberRows: { channelId: string; userId: string; lastReadAt: string }[],
-  viewerHandle: string,
-): Promise<ChannelSummary[]> {
-  const channelRows = await db
-    .select()
-    .from(channels)
-    .where(eq(channels.workspaceId, workspaceId))
-    .orderBy(asc(channels.createdAt));
-  if (channelRows.length === 0) return [];
+type ChannelMemberRow = {
+  channelId: string;
+  userId: string;
+  typingAt: string | null;
+  typingThreadId: string | null;
+};
 
+/**
+ * Everything the sidebar needs about channels in three statements, none of which scans message
+ * history: the channel list with the viewer's read marker and an index-assisted last-message lookup,
+ * every membership row (member counts, DM peers, the open channel's members and typing state), and
+ * one grouped unread and mention count that only visits messages newer than the viewer's read marker.
+ */
+async function channelSummaries(workspaceId: string, viewerId: string, viewerHandle: string) {
   // A subquery binds one parameter; listing every channel id would exceed D1's 100-parameter limit.
   const ids = db
     .select({ id: channels.id })
     .from(channels)
     .where(eq(channels.workspaceId, workspaceId));
-  const allMembers = await db
-    .select({ channelId: channelMembers.channelId, userId: channelMembers.userId })
-    .from(channelMembers)
-    .where(inArray(channelMembers.channelId, ids));
   const mentionPattern = `%@${viewerHandle.replace(/[!%_]/g, '!$&')}%`;
 
-  const [lastRows, unreadRows, mentionRows] = await Promise.all([
+  const [channelRows, allMembers, countRows] = await Promise.all([
     db
       .select({
-        channelId: messages.channelId,
-        last: sql<string | null>`max(${messages.createdAt})`,
+        id: channels.id,
+        name: channels.name,
+        topic: channels.topic,
+        kind: channels.kind,
+        mineChannelId: channelMembers.channelId,
+        lastMessageAt: sql<string | null>`(select max(${messages.createdAt}) from ${messages} where ${messages.channelId} = ${channels.id} and ${messages.deletedAt} is null)`,
       })
-      .from(messages)
-      .where(and(inArray(messages.channelId, ids), isNull(messages.deletedAt)))
-      .groupBy(messages.channelId),
-    db
-      .select({
-        channelId: messages.channelId,
-        count: sql<number>`count(*)`,
-      })
-      .from(messages)
-      .innerJoin(
+      .from(channels)
+      .leftJoin(
         channelMembers,
-        and(
-          eq(channelMembers.channelId, messages.channelId),
-          eq(channelMembers.userId, viewerId),
-        ),
+        and(eq(channelMembers.channelId, channels.id), eq(channelMembers.userId, viewerId)),
       )
-      .where(
+      .where(eq(channels.workspaceId, workspaceId))
+      .orderBy(asc(channels.createdAt)),
+    db
+      .select({
+        channelId: channelMembers.channelId,
+        userId: channelMembers.userId,
+        typingAt: channelMembers.typingAt,
+        typingThreadId: channelMembers.typingThreadId,
+      })
+      .from(channelMembers)
+      .where(inArray(channelMembers.channelId, ids)),
+    db
+      .select({
+        channelId: channelMembers.channelId,
+        unread: sql<number>`sum(case when ${messages.parentId} is null then 1 else 0 end)`,
+        mentions: sql<number>`sum(case when lower(${messages.body}) like ${mentionPattern} escape '!' then 1 else 0 end)`,
+      })
+      .from(channelMembers)
+      .innerJoin(
+        messages,
         and(
-          inArray(messages.channelId, ids),
+          eq(messages.channelId, channelMembers.channelId),
           gt(messages.createdAt, channelMembers.lastReadAt),
           ne(messages.userId, viewerId),
           isNull(messages.deletedAt),
-          isNull(messages.parentId),
         ),
       )
-      .groupBy(messages.channelId),
-    db
-      .select({
-        channelId: messages.channelId,
-        count: sql<number>`count(*)`,
-      })
-      .from(messages)
-      .innerJoin(
-        channelMembers,
-        and(
-          eq(channelMembers.channelId, messages.channelId),
-          eq(channelMembers.userId, viewerId),
-        ),
-      )
-      .where(
-        and(
-          inArray(messages.channelId, ids),
-          gt(messages.createdAt, channelMembers.lastReadAt),
-          ne(messages.userId, viewerId),
-          isNull(messages.deletedAt),
-          sql`lower(${messages.body}) like ${mentionPattern} escape '!'`,
-        ),
-      )
-      .groupBy(messages.channelId),
+      .where(and(eq(channelMembers.userId, viewerId), inArray(channelMembers.channelId, ids)))
+      .groupBy(channelMembers.channelId),
   ]);
 
   const memberCount = new Map<string, number>();
   for (const row of allMembers) {
     memberCount.set(row.channelId, (memberCount.get(row.channelId) ?? 0) + 1);
   }
-  const lastMap = new Map(lastRows.map((row) => [row.channelId, row.last]));
-  const unreadMap = new Map(unreadRows.map((row) => [row.channelId, Number(row.count)]));
-  const mentionMap = new Map(mentionRows.map((row) => [row.channelId, Number(row.count)]));
-  const mine = new Map(memberRows.map((row) => [row.channelId, row]));
+  const counts = new Map(countRows.map((row) => [row.channelId, row]));
 
-  return channelRows.map((channel) => ({
+  const summaries: ChannelSummary[] = channelRows.map((channel) => ({
     id: channel.id,
     name: channel.name,
     topic: channel.topic,
     kind: channel.kind as ChannelSummary['kind'],
-    unread: unreadMap.get(channel.id) ?? 0,
-    mentions: mentionMap.get(channel.id) ?? 0,
+    unread: Number(counts.get(channel.id)?.unread ?? 0),
+    mentions: Number(counts.get(channel.id)?.mentions ?? 0),
     memberCount: memberCount.get(channel.id) ?? 0,
-    lastMessageAt: lastMap.get(channel.id) ?? null,
-    isMember: mine.has(channel.id),
+    lastMessageAt: channel.lastMessageAt ?? null,
+    isMember: channel.mineChannelId !== null,
   }));
+  return { summaries, allMembers };
 }
 
 function dmFor(channel: ChannelSummary, viewerId: string, allMembers: { channelId: string; userId: string }[], usersById: Map<string, UserSummary>): DmSummary {
@@ -552,6 +544,7 @@ export const joinWorkspaceFn = createServerFn({ method: 'POST' })
           .values({ channelId: channel.id, userId: me.id })
           .onConflictDoNothing();
       }
+      await publish(workspace.id, [toWorkspace({ t: 'workspace' })]);
     }
     return { slug: workspace.slug };
   });
@@ -586,6 +579,7 @@ export const createChannelFn = createServerFn({ method: 'POST' })
       createdBy: me.id,
     });
     const memberIds = new Set([me.id, ...data.memberIds]);
+    const added: string[] = [];
     for (const userId of memberIds) {
       const member = await db
         .select({ userId: workspaceMembers.userId })
@@ -593,8 +587,13 @@ export const createChannelFn = createServerFn({ method: 'POST' })
         .where(and(eq(workspaceMembers.workspaceId, data.workspaceId), eq(workspaceMembers.userId, userId)));
       if (member.length > 0) {
         await db.insert(channelMembers).values({ channelId, userId }).onConflictDoNothing();
+        added.push(userId);
       }
     }
+    await publish(data.workspaceId, [
+      toWorkspace({ t: 'workspace' }),
+      ...added.map((userId) => toUser(userId, { t: 'grants' })),
+    ]);
     return { channelId, name };
   });
 
@@ -607,6 +606,7 @@ export const joinChannelFn = createServerFn({ method: 'POST' })
     await requireWorkspace(channel.workspaceId, me.id);
     if (channel.kind !== 'public') throw new Error('This channel is invite only.');
     await db.insert(channelMembers).values({ channelId: channel.id, userId: me.id }).onConflictDoNothing();
+    await publish(channel.workspaceId, [toUser(me.id, { t: 'grants' }), toChannel(channel.id, { t: 'chat', c: channel.id })]);
     return { ok: true as const };
   });
 
@@ -645,6 +645,7 @@ export const openDmFn = createServerFn({ method: 'POST' })
       { channelId, userId: me.id },
       { channelId, userId: data.userId },
     ]);
+    await publish(data.workspaceId, [toUser(me.id, { t: 'grants' }), toUser(data.userId, { t: 'grants' })]);
     return { channelId };
   });
 
@@ -662,6 +663,7 @@ async function activeCall(channelId: string, now: number): Promise<CallView | nu
       userId: callParticipants.userId,
       name: users.name,
       avatarColor: users.avatarColor,
+      avatarKey: users.avatarKey,
       muted: callParticipants.muted,
       cameraOn: callParticipants.cameraOn,
       sharing: callParticipants.sharing,
@@ -692,6 +694,7 @@ async function activeCall(channelId: string, now: number): Promise<CallView | nu
       userId: row.userId,
       name: row.name,
       avatarColor: row.avatarColor,
+      avatarUrl: avatarUrlFor(row.userId, row.avatarKey),
       muted: row.muted,
       cameraOn: row.cameraOn,
       sharing: row.sharing,
@@ -705,39 +708,37 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.slug, data.slug));
-    if (!workspace) throw new Error('Workspace not found.');
-    const membership = await requireWorkspace(workspace.id, me.id);
-    await touchPresence(me.id);
-
-    const memberRows = await db
+    // Workspace and the viewer's membership in one statement; the slow path only picks the message.
+    const [workspaceRow] = await db
       .select({
-        channelId: channelMembers.channelId,
-        userId: channelMembers.userId,
-        lastReadAt: channelMembers.lastReadAt,
+        id: workspaces.id,
+        name: workspaces.name,
+        slug: workspaces.slug,
+        inviteCode: workspaces.inviteCode,
+        role: workspaceMembers.role,
       })
-      .from(channelMembers)
-      .innerJoin(channels, eq(channels.id, channelMembers.channelId))
-      .where(and(eq(channels.workspaceId, workspace.id), eq(channelMembers.userId, me.id)));
+      .from(workspaces)
+      .innerJoin(
+        workspaceMembers,
+        and(eq(workspaceMembers.workspaceId, workspaces.id), eq(workspaceMembers.userId, me.id)),
+      )
+      .where(eq(workspaces.slug, data.slug));
+    if (!workspaceRow) {
+      const [exists] = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.slug, data.slug));
+      throw new Error(exists ? 'You are not a member of this workspace.' : 'Workspace not found.');
+    }
+    const { role, ...workspace } = workspaceRow;
+    // The session lookup already read lastSeenAt, so presence needs no read of its own.
+    if (Date.now() - new Date(me.lastSeenAt).getTime() >= PRESENCE_REFRESH_MS) {
+      await db.update(users).set({ lastSeenAt: new Date().toISOString() }).where(eq(users.id, me.id));
+    }
 
-    const [members, summaries] = await Promise.all([
+    const [members, { summaries, allMembers: allChannelMemberRows }] = await Promise.all([
       memberUsers(workspace.id),
-      channelSummaries(workspace.id, me.id, memberRows, mentionHandle(me)),
+      channelSummaries(workspace.id, me.id, mentionHandle(me)),
     ]);
     const usersById = new Map(members.map((member) => [member.id, member]));
-    const myChannelIds = new Set(memberRows.map((row) => row.channelId));
-
-    const allChannelMemberRows = summaries.length
-      ? await db
-          .select({ channelId: channelMembers.channelId, userId: channelMembers.userId })
-          .from(channelMembers)
-          .where(
-            inArray(
-              channelMembers.channelId,
-              db.select({ id: channels.id }).from(channels).where(eq(channels.workspaceId, workspace.id)),
-            ),
-          )
-      : [];
+    const myChannelIds = new Set(summaries.filter((channel) => channel.isMember).map((channel) => channel.id));
 
     const visibleChannels = summaries.filter(
       (channel) =>
@@ -762,7 +763,8 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
     let channelMembersView: UserSummary[] = [];
     if (selected) {
       const now = Date.now();
-      const [roots, typingRows, callView, memberRowsForChannel] = await Promise.all([
+      const typingCutoff = new Date(now - TYPING_WINDOW_MS).toISOString();
+      const [roots, callView] = await Promise.all([
         db
           .select(messageSelection)
           .from(messages)
@@ -776,38 +778,22 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
           )
           .orderBy(desc(messages.createdAt))
           .limit(60),
-        db
-          .select(userSelection)
-          .from(channelMembers)
-          .innerJoin(users, eq(users.id, channelMembers.userId))
-          .where(
-            and(
-              eq(channelMembers.channelId, selected.id),
-              ne(channelMembers.userId, me.id),
-              gt(channelMembers.typingAt, new Date(now - TYPING_WINDOW_MS).toISOString()),
-              isNull(channelMembers.typingThreadId),
-            ),
-          ),
         activeCall(selected.id, now),
-        db
-          .select({
-            id: users.id,
-            name: users.name,
-            email: users.email,
-            avatarColor: users.avatarColor,
-            title: users.title,
-            statusEmoji: users.statusEmoji,
-            statusText: users.statusText,
-            lastSeenAt: users.lastSeenAt,
-          })
-          .from(channelMembers)
-          .innerJoin(users, eq(users.id, channelMembers.userId))
-          .where(eq(channelMembers.channelId, selected.id)),
       ]);
+      // Members and who is typing come from the membership rows already loaded above.
+      const selectedMembers = allChannelMemberRows.filter((row) => row.channelId === selected.id);
       messageRows = roots.reverse();
-      typing = typingRows.map((row) => toUserSummary(row));
+      typing = selectedMembers
+        .filter(
+          (row) =>
+            row.userId !== me.id &&
+            !row.typingThreadId &&
+            row.typingAt !== null &&
+            row.typingAt > typingCutoff,
+        )
+        .flatMap((row) => usersById.get(row.userId) ?? []);
       call = callView;
-      channelMembersView = memberRowsForChannel.map((row) => toUserSummary(row));
+      channelMembersView = selectedMembers.flatMap((row) => usersById.get(row.userId) ?? []);
     }
 
     const messagesView = await hydrateMessages(messageRows, me.id);
@@ -819,7 +805,7 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
         name: workspace.name,
         slug: workspace.slug,
         inviteCode: workspace.inviteCode,
-        role: membership.role,
+        role,
       },
       me,
       channels: visibleChannels.filter((channel) => channel.kind !== 'dm'),
@@ -1039,6 +1025,9 @@ export const sendMessageFn = createServerFn({ method: 'POST' })
     } catch (error) {
       console.error('Could not record message references', error);
     }
+    await publish(channel.workspaceId, [
+      toChannel(data.channelId, { t: 'chat', c: data.channelId, ...(data.parentId ? { m: data.parentId } : {}) }),
+    ]);
     return { id };
   });
 
@@ -1047,11 +1036,11 @@ export const toggleReactionFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const me = await requireUser();
     const [message] = await db
-      .select({ channelId: messages.channelId })
+      .select({ channelId: messages.channelId, parentId: messages.parentId })
       .from(messages)
       .where(and(eq(messages.id, data.messageId), isNull(messages.deletedAt)));
     if (!message) throw new Error('Message not found.');
-    await requireChannel(message.channelId, me.id);
+    const channel = await requireChannel(message.channelId, me.id);
     const removed = await db
       .delete(reactions)
       .where(
@@ -1072,6 +1061,13 @@ export const toggleReactionFn = createServerFn({ method: 'POST' })
         })
         .onConflictDoNothing();
     }
+    await publish(channel.workspaceId, [
+      toChannel(message.channelId, {
+        t: 'chat',
+        c: message.channelId,
+        m: message.parentId ?? data.messageId,
+      }),
+    ]);
     return { ok: true as const };
   });
 
@@ -1079,11 +1075,13 @@ export const markReadFn = createServerFn({ method: 'POST' })
   .validator(z.object({ channelId: z.string() }))
   .handler(async ({ data }) => {
     const me = await requireUser();
-    await requireChannel(data.channelId, me.id);
+    const channel = await requireChannel(data.channelId, me.id);
     await db
       .update(channelMembers)
       .set({ lastReadAt: new Date().toISOString() })
       .where(and(eq(channelMembers.channelId, data.channelId), eq(channelMembers.userId, me.id)));
+    // Other open tabs of this person clear the unread badge too.
+    await publish(channel.workspaceId, [toUser(me.id, { t: 'read' })]);
     return { ok: true as const };
   });
 
@@ -1098,7 +1096,7 @@ export const setTypingFn = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }) => {
     const me = await requireUser();
-    await requireChannel(data.channelId, me.id);
+    const channel = await requireChannel(data.channelId, me.id);
     await db
       .update(channelMembers)
       .set({
@@ -1106,6 +1104,7 @@ export const setTypingFn = createServerFn({ method: 'POST' })
         typingThreadId: data.active ? (data.threadId ?? null) : null,
       })
       .where(and(eq(channelMembers.channelId, data.channelId), eq(channelMembers.userId, me.id)));
+    await publish(channel.workspaceId, [toChannel(data.channelId, { t: 'typing', c: data.channelId })]);
     return { ok: true as const };
   });
 
@@ -1153,7 +1152,8 @@ export const updateChannelFn = createServerFn({ method: 'POST' })
   .validator(z.object({ channelId: z.string(), topic: z.string().trim().max(160) }))
   .handler(async ({ data }) => {
     const me = await requireUser();
-    await requireChannel(data.channelId, me.id);
+    const channel = await requireChannel(data.channelId, me.id);
     await db.update(channels).set({ topic: data.topic }).where(eq(channels.id, data.channelId));
+    await publish(channel.workspaceId, [toChannel(data.channelId, { t: 'chat', c: data.channelId })]);
     return { ok: true as const };
   });

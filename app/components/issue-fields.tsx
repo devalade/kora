@@ -5,10 +5,10 @@ import { createLabelFn } from '../lib/tasks';
 import type { TaskLabel, TaskPriority, TasksSnapshot } from '../lib/types';
 import { cn } from '../utils/cn';
 import { Avatar } from './avatar';
+import { CalendarPanel } from './date-picker';
+import { FloatingMenu } from './floating';
 import {
-  menuSurface,
   propertyTrigger,
-  useMenuPlacement,
   type PropertyOption,
   type PropertyVariant,
 } from './property-select';
@@ -36,7 +36,7 @@ export function assigneeOptions(snapshot: TasksSnapshot): PropertyOption[] {
     ...snapshot.members.map((member) => ({
       value: member.id,
       label: member.name,
-      icon: <Avatar name={member.name} color={member.avatarColor} size="2xs" />,
+      icon: <Avatar name={member.name} src={member.avatarUrl} color={member.avatarColor} size="2xs" />,
     })),
   ];
 }
@@ -98,7 +98,7 @@ export function LabelSelect({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listId = useId();
-  const up = useMenuPlacement(open, triggerRef);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const all = useMemo(
     () => [...labels, ...created.filter((label) => !labels.some((item) => item.id === label.id))],
@@ -114,7 +114,8 @@ export function LabelSelect({
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       setOpen(false);
     };
     document.addEventListener('pointerdown', onPointerDown);
@@ -232,7 +233,7 @@ export function LabelSelect({
       )}
 
       {open && (
-        <div className={cn(menuSurface, up ? 'bottom-full mb-1' : 'top-full mt-1', 'popover-in')}>
+        <FloatingMenu anchor={triggerRef} menuRef={menuRef} className="popover-in">
           <input
             ref={searchRef}
             value={query}
@@ -249,7 +250,7 @@ export function LabelSelect({
             role="listbox"
             aria-multiselectable="true"
             aria-label="Labels"
-            className="max-h-[280px] overflow-y-auto p-1"
+            className="max-h-[280px] min-h-0 overflow-y-auto p-1"
           >
             {visible.map((label, index) => {
               const isSelected = selectedIds.includes(label.id);
@@ -303,7 +304,7 @@ export function LabelSelect({
             )}
             {rows === 0 && <p className="px-2 py-2 text-[13px] text-muted">No labels yet</p>}
           </div>
-        </div>
+        </FloatingMenu>
       )}
     </div>
   );
@@ -334,7 +335,7 @@ export function formatIssueDate(value: string) {
     : longDate.format(date);
 }
 
-/** A ghost button that opens the browser's date picker; the value is a YYYY-MM-DD string. */
+/** A ghost button that opens a calendar popover; the value is a YYYY-MM-DD string. */
 export function DateSelect({
   value,
   onChange,
@@ -353,24 +354,46 @@ export function DateSelect({
   variant: Exclude<PropertyVariant, 'field'>;
   overdue?: boolean;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  function openPicker() {
-    const input = inputRef.current;
-    if (!input) return;
-    try {
-      input.showPicker();
-    } catch {
-      input.focus();
-      input.click();
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
+  function close() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function pick(next: string | null) {
+    onChange(next);
+    close();
   }
 
   return (
-    <div className="group relative min-w-0">
+    <div ref={rootRef} className="group relative min-w-0">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={openPicker}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' && !open) {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         aria-label={value ? `${label}: ${formatIssueDate(value)}` : placeholder}
         className={cn(propertyTrigger[variant], overdue && value && 'text-danger')}
       >
@@ -381,7 +404,7 @@ export function DateSelect({
           {value ? `${prefix ? `${prefix} ` : ''}${formatIssueDate(value)}` : placeholder}
         </span>
       </button>
-      {value && variant === 'row' && (
+      {value && variant === 'row' && !open && (
         <button
           type="button"
           onClick={() => onChange(null)}
@@ -391,15 +414,17 @@ export function DateSelect({
           <X size={13} />
         </button>
       )}
-      <input
-        ref={inputRef}
-        type="date"
-        tabIndex={-1}
-        aria-hidden="true"
-        value={value ?? ''}
-        onChange={(event) => onChange(event.target.value || null)}
-        className="pointer-events-none absolute bottom-0 left-0 h-0 w-0 opacity-0"
-      />
+      {open && (
+        <FloatingMenu anchor={triggerRef} menuRef={menuRef} className="min-w-0">
+          <CalendarPanel
+            value={value}
+            label={label}
+            onSelect={(next) => pick(next)}
+            onClear={() => pick(null)}
+            onClose={close}
+          />
+        </FloatingMenu>
+      )}
     </div>
   );
 }

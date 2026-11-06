@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
-import { and, db, desc, eq, like, ne, or, sql } from 'void/db';
+import { and, db, desc, eq, isNull, like, ne, or, sql } from 'void/db';
 import {
   channelMembers,
   channels,
@@ -103,6 +103,7 @@ export const searchIssueRefsFn = createServerFn({ method: 'GET' })
           assigneeName: users.name,
           assigneeEmail: users.email,
           assigneeAvatarColor: users.avatarColor,
+          assigneeAvatarKey: users.avatarKey,
           assigneeTitle: users.title,
           assigneeStatusEmoji: users.statusEmoji,
           assigneeStatusText: users.statusText,
@@ -115,6 +116,7 @@ export const searchIssueRefsFn = createServerFn({ method: 'GET' })
         .where(
           and(
             eq(issues.workspaceId, workspaceId),
+            isNull(issues.deletedAt),
             query ? or(...matches) : undefined,
           ),
         )
@@ -169,6 +171,7 @@ export const searchIssueRefsFn = createServerFn({ method: 'GET' })
                 name: row.assigneeName ?? '',
                 email: row.assigneeEmail ?? '',
                 avatarColor: row.assigneeAvatarColor ?? '',
+                avatarKey: row.assigneeAvatarKey,
                 title: row.assigneeTitle ?? '',
                 statusEmoji: row.assigneeStatusEmoji ?? '',
                 statusText: row.assigneeStatusText ?? '',

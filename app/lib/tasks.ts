@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
-import { and, asc, db, desc, eq, gt, inArray, sql } from 'void/db';
+import { and, asc, db, desc, eq, gt, inArray, isNotNull, isNull, lt, sql } from 'void/db';
 import {
   issueComments,
   issueEditors,
@@ -18,7 +18,16 @@ import { z } from 'zod';
 import { issueSubscribers, notify, recordIssueEvent } from './activity';
 import { newId } from './ids';
 import { toUserSummary } from './people';
-import { inChunks, memberUsers, requireWorkspace, touchPresence } from './server';
+import {
+  inChunks,
+  isAdminRole,
+  memberUsers,
+  requireAdmin,
+  requireUser,
+  requireWorkspace,
+  touchPresence,
+} from './server';
+import { publish, toWorkspace } from './realtime';
 import { readSessionUser } from './session';
 import {
   DEFAULT_TASK_STATUSES,
@@ -55,6 +64,15 @@ function colorForLabel(name: string) {
   return TASK_LABEL_COLORS[Math.abs(hash) % TASK_LABEL_COLORS.length] ?? TASK_LABEL_COLORS[0];
 }
 
+
+/** Someone with an issue open pings every 20 s; they are listed as viewing for this long after. */
+const ISSUE_VIEWER_WINDOW_MS = 50_000;
+
+/** Every open tasks screen in the workspace refreshes: the list, the issue page, the sidebar counts. */
+async function issueChanged(workspaceId: string, issueId?: string) {
+  await publish(workspaceId, [toWorkspace({ t: 'issue', ...(issueId ? { i: issueId } : {}) })]);
+}
+
 const issueSelection = {
   id: issues.id,
   number: issues.number,
@@ -80,12 +98,14 @@ const issueSelection = {
   assigneeName: users.name,
   assigneeEmail: users.email,
   assigneeAvatarColor: users.avatarColor,
+  assigneeAvatarKey: users.avatarKey,
   assigneeTitle: users.title,
   assigneeStatusEmoji: users.statusEmoji,
   assigneeStatusText: users.statusText,
   assigneeLastSeenAt: users.lastSeenAt,
   createdAt: issues.createdAt,
   updatedAt: issues.updatedAt,
+  descriptionVersion: issues.descriptionVersion,
 };
 
 type IssueRow = {
@@ -113,12 +133,14 @@ type IssueRow = {
   assigneeName: string | null;
   assigneeEmail: string | null;
   assigneeAvatarColor: string | null;
+  assigneeAvatarKey: string | null;
   assigneeTitle: string | null;
   assigneeStatusEmoji: string | null;
   assigneeStatusText: string | null;
   assigneeLastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
+  descriptionVersion: number;
 };
 
 function toProjectStatus(value: string): TaskProjectStatus {
@@ -249,6 +271,7 @@ function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: numb
             name: row.assigneeName,
             email: row.assigneeEmail,
             avatarColor: row.assigneeAvatarColor,
+            avatarKey: row.assigneeAvatarKey,
             title: row.assigneeTitle ?? '',
             statusEmoji: row.assigneeStatusEmoji ?? '',
             statusText: row.assigneeStatusText ?? '',
@@ -259,6 +282,7 @@ function toIssue(row: IssueRow, issueLabelsList: TaskLabel[], commentCount: numb
     commentCount,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    descriptionVersion: row.descriptionVersion,
   };
 }
 
@@ -297,7 +321,8 @@ async function commentCountsFor(issueIds: string[]) {
   return new Map(rows.map((row) => [row.issueId, Number(row.count)]));
 }
 
-async function requireIssue(issueId: string, userId: string) {
+/** Loads an issue the user may act on. Issues in the trash are hidden unless restoring. */
+async function requireIssue(issueId: string, userId: string, { allowDeleted = false } = {}) {
   const [row] = await db
     .select({
       id: issues.id,
@@ -305,12 +330,14 @@ async function requireIssue(issueId: string, userId: string) {
       teamId: issues.teamId,
       startDate: issues.startDate,
       dueDate: issues.dueDate,
+      createdBy: issues.createdBy,
+      deletedAt: issues.deletedAt,
     })
     .from(issues)
     .where(eq(issues.id, issueId));
-  if (!row) throw new Error('Issue not found.');
-  await requireWorkspace(row.workspaceId, userId);
-  return row;
+  if (!row || (row.deletedAt && !allowDeleted)) throw new Error('Issue not found.');
+  const membership = await requireWorkspace(row.workspaceId, userId);
+  return { ...row, role: membership.role };
 }
 
 function parseIssueKey(key: string) {
@@ -391,6 +418,7 @@ async function issueRowByKey(workspaceId: string, issueKey: string) {
     .where(
       and(
         eq(issues.workspaceId, workspaceId),
+        isNull(issues.deletedAt),
         eq(issues.teamId, team.id),
         eq(issues.number, number),
       ),
@@ -407,6 +435,7 @@ function toComment(row: {
   authorName: string;
   authorEmail: string;
   authorAvatarColor: string;
+  authorAvatarKey: string | null;
   authorTitle: string;
   authorStatusEmoji: string;
   authorStatusText: string;
@@ -421,6 +450,7 @@ function toComment(row: {
       name: row.authorName,
       email: row.authorEmail,
       avatarColor: row.authorAvatarColor,
+      avatarKey: row.authorAvatarKey,
       title: row.authorTitle,
       statusEmoji: row.authorStatusEmoji,
       statusText: row.authorStatusText,
@@ -439,6 +469,7 @@ type EventRow = {
   actorName: string | null;
   actorEmail: string | null;
   actorAvatarColor: string | null;
+  actorAvatarKey: string | null;
   actorTitle: string | null;
   actorStatusEmoji: string | null;
   actorStatusText: string | null;
@@ -466,6 +497,7 @@ function toEvent(row: EventRow): TaskEvent {
             name: row.actorName,
             email: row.actorEmail,
             avatarColor: row.actorAvatarColor,
+            avatarKey: row.actorAvatarKey,
             title: row.actorTitle ?? '',
             statusEmoji: row.actorStatusEmoji ?? '',
             statusText: row.actorStatusText ?? '',
@@ -485,6 +517,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       name: users.name,
       email: users.email,
       avatarColor: users.avatarColor,
+      avatarKey: users.avatarKey,
       title: users.title,
       statusEmoji: users.statusEmoji,
       statusText: users.statusText,
@@ -504,6 +537,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       actorName: users.name,
       actorEmail: users.email,
       actorAvatarColor: users.avatarColor,
+      actorAvatarKey: users.avatarKey,
       actorTitle: users.title,
       actorStatusEmoji: users.statusEmoji,
       actorStatusText: users.statusText,
@@ -535,6 +569,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
         authorName: users.name,
         authorEmail: users.email,
         authorAvatarColor: users.avatarColor,
+        authorAvatarKey: users.avatarKey,
         authorTitle: users.title,
         authorStatusEmoji: users.statusEmoji,
         authorStatusText: users.statusText,
@@ -551,7 +586,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       .leftJoin(projects, eq(projects.id, issues.projectId))
       .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
       .leftJoin(users, eq(users.id, issues.assigneeId))
-      .where(eq(issues.parentIssueId, row.id))
+      .where(and(eq(issues.parentIssueId, row.id), isNull(issues.deletedAt)))
       .orderBy(asc(issues.number)),
     row.parentId
       ? db
@@ -561,7 +596,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       .leftJoin(projects, eq(projects.id, issues.projectId))
           .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
           .leftJoin(users, eq(users.id, issues.assigneeId))
-          .where(eq(issues.id, row.parentId))
+          .where(and(eq(issues.id, row.parentId), isNull(issues.deletedAt)))
       : Promise.resolve([]),
     db
       .select({
@@ -569,6 +604,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
         name: users.name,
         email: users.email,
         avatarColor: users.avatarColor,
+        avatarKey: users.avatarKey,
         title: users.title,
         statusEmoji: users.statusEmoji,
         statusText: users.statusText,
@@ -580,7 +616,7 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
       .where(
         and(
           eq(issueEditors.issueId, row.id),
-          gt(issueEditors.updatedAt, new Date(Date.now() - 15_000).toISOString()),
+          gt(issueEditors.updatedAt, new Date(Date.now() - ISSUE_VIEWER_WINDOW_MS).toISOString()),
         ),
       ),
     creatorRows,
@@ -611,6 +647,20 @@ async function issueDetail(row: IssueRow): Promise<TaskIssueDetail> {
   };
 }
 
+/** Hard-deletes issues that have sat in the trash for 30 days. Bounded so a load never stalls. */
+async function purgeExpiredTrash(workspaceId: string) {
+  const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const expired = await db
+    .select({ id: issues.id })
+    .from(issues)
+    .where(and(eq(issues.workspaceId, workspaceId), lt(issues.deletedAt, cutoff)))
+    .limit(20);
+  if (expired.length === 0) return;
+  const ids = expired.map((row) => row.id);
+  await db.update(issues).set({ parentIssueId: null }).where(inArray(issues.parentIssueId, ids));
+  await db.delete(issues).where(inArray(issues.id, ids));
+}
+
 export const getTasksFn = createServerFn({ method: 'GET' })
   .validator(z.object({ slug: z.string() }))
   .handler(async ({ data }) => {
@@ -619,7 +669,12 @@ export const getTasksFn = createServerFn({ method: 'GET' })
     const { workspace, membership, statuses } = await workspaceForSlug(data.slug, me.id);
     await touchPresence(me.id);
 
-    const [existingTeams, labelRows, members, issueRows, projectRows] = await Promise.all([
+    await purgeExpiredTrash(workspace.id);
+    const [[totalRow], existingTeams, labelRows, members, issueRows, projectRows] = await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(issues)
+        .where(and(eq(issues.workspaceId, workspace.id), isNull(issues.deletedAt))),
       db
         .select()
         .from(teams)
@@ -634,7 +689,7 @@ export const getTasksFn = createServerFn({ method: 'GET' })
       .leftJoin(projects, eq(projects.id, issues.projectId))
         .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
         .leftJoin(users, eq(users.id, issues.assigneeId))
-        .where(eq(issues.workspaceId, workspace.id))
+        .where(and(eq(issues.workspaceId, workspace.id), isNull(issues.deletedAt)))
         .orderBy(desc(issues.updatedAt))
         .limit(500),
       db
@@ -723,19 +778,101 @@ export const getTasksFn = createServerFn({ method: 'GET' })
       issues: issuesWithSubIssues,
       counts: {
         all: issuesWithSubIssues.length,
+        total: Number(totalRow?.count ?? issuesWithSubIssues.length),
         mine: issuesWithSubIssues.filter((issue) => issue.assignee?.id === me.id).length,
         byStatus,
       },
     } satisfies TasksSnapshot;
   });
 
+// Server-side task search lives next to getTasksFn so it shares the list's row selection.
+const TASK_SEARCH_LIMIT = 50;
+
+// Escape LIKE wildcards so "100%" or "a_b" match literally.
+const likeContains = (text: string) => `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
+/**
+ * Finds issues by title or key ("KOR-12", "kor-1" or "12") across EVERY non-deleted issue of the
+ * workspace, not only the most recent ones the task list loads. Returns the same shape the list
+ * uses, newest update first.
+ */
+export const searchTasksFn = createServerFn({ method: 'GET' })
+  .validator(z.object({ slug: z.string().max(100), query: z.string().trim().min(1).max(100) }))
+  .handler(async ({ data }): Promise<TaskIssue[]> => {
+    const me = await requireUser();
+    const [workspace] = await db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(eq(workspaces.slug, data.slug));
+    if (!workspace) throw new Error('Workspace not found.');
+    await requireWorkspace(workspace.id, me.id);
+
+    const pattern = likeContains(data.query);
+    const key = sql`${teams.key} || '-' || ${issues.number}`;
+    const rows = await db
+      .select(issueSelection)
+      .from(issues)
+      .innerJoin(teams, eq(teams.id, issues.teamId))
+      .leftJoin(projects, eq(projects.id, issues.projectId))
+      .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+      .leftJoin(users, eq(users.id, issues.assigneeId))
+      .where(
+        and(
+          eq(issues.workspaceId, workspace.id),
+          isNull(issues.deletedAt),
+          sql`(${issues.title} LIKE ${pattern} ESCAPE '\\' OR ${key} LIKE ${pattern} ESCAPE '\\')`,
+        ),
+      )
+      .orderBy(desc(issues.updatedAt))
+      .limit(TASK_SEARCH_LIMIT);
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((row) => row.id);
+    const [labelMap, commentMap, children] = await Promise.all([
+      issueLabelsFor(ids),
+      commentCountsFor(ids),
+      // Sub-issue progress, counted over live children only.
+      inChunks(ids, (chunk) =>
+        db
+          .select({ parentId: issues.parentIssueId, category: taskStatuses.category })
+          .from(issues)
+          .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+          .where(and(inArray(issues.parentIssueId, chunk), isNull(issues.deletedAt))),
+      ),
+    ]);
+    const progress = new Map<string, { total: number; done: number }>();
+    for (const child of children) {
+      if (!child.parentId) continue;
+      const entry = progress.get(child.parentId) ?? { total: 0, done: 0 };
+      entry.total += 1;
+      if (child.category === 'completed') entry.done += 1;
+      progress.set(child.parentId, entry);
+    }
+    return rows.map((row) => ({
+      ...toIssue(row, labelMap.get(row.id) ?? [], commentMap.get(row.id) ?? 0),
+      subIssueCount: progress.get(row.id)?.total ?? 0,
+      subIssueDone: progress.get(row.id)?.done ?? 0,
+    }));
+  });
+
 export const touchIssueEditorFn = createServerFn({ method: 'POST' })
-  .validator(z.object({ issueId: z.string() }))
+  .validator(z.object({ issueId: z.string(), leave: z.boolean().optional() }))
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    await requireIssue(data.issueId, me.id);
+    const issue = await requireIssue(data.issueId, me.id);
+    if (data.leave) {
+      await db
+        .delete(issueEditors)
+        .where(and(eq(issueEditors.issueId, data.issueId), eq(issueEditors.userId, me.id)));
+      await publish(issue.workspaceId, [toWorkspace({ t: 'editors', i: data.issueId })]);
+      return { ok: true as const };
+    }
     const now = new Date().toISOString();
+    const [before] = await db
+      .select({ updatedAt: issueEditors.updatedAt })
+      .from(issueEditors)
+      .where(and(eq(issueEditors.issueId, data.issueId), eq(issueEditors.userId, me.id)));
     await db
       .insert(issueEditors)
       .values({ issueId: data.issueId, userId: me.id, updatedAt: now })
@@ -743,6 +880,10 @@ export const touchIssueEditorFn = createServerFn({ method: 'POST' })
         target: [issueEditors.issueId, issueEditors.userId],
         set: { updatedAt: now },
       });
+    // Announce only arrivals; the heartbeat that keeps someone listed is not news.
+    if (!before || Date.parse(before.updatedAt) < Date.now() - ISSUE_VIEWER_WINDOW_MS) {
+      await publish(issue.workspaceId, [toWorkspace({ t: 'editors', i: data.issueId })]);
+    }
     return { ok: true as const };
   });
 
@@ -751,7 +892,7 @@ export const setIssueTypingFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    await requireIssue(data.issueId, me.id);
+    const issue = await requireIssue(data.issueId, me.id);
     const now = new Date().toISOString();
     const typingAt = data.active ? now : null;
     await db
@@ -761,6 +902,7 @@ export const setIssueTypingFn = createServerFn({ method: 'POST' })
         target: [issueEditors.issueId, issueEditors.userId],
         set: { updatedAt: now, typingAt },
       });
+    await publish(issue.workspaceId, [toWorkspace({ t: 'editors', i: data.issueId })]);
     return { ok: true as const };
   });
 
@@ -878,6 +1020,7 @@ export const createIssueFn = createServerFn({ method: 'POST' })
         body: data.title,
       });
     }
+    await issueChanged(workspace.id, issueId);
     return { issueId, key: `${team.key}-${created?.number ?? ''}` };
   });
 
@@ -915,6 +1058,8 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
       // A sub-issue is an ordinary issue with a parent; null detaches it.
       parentIssueId: z.string().max(64).nullable().optional(),
       projectId: z.string().max(64).nullable().optional(),
+      // The description version the editor started from; a newer one on the server is a conflict.
+      descriptionBaseVersion: z.number().int().min(0).optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -966,7 +1111,36 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
     if (nextStart && nextDue && nextDue < nextStart) {
       throw new Error('The due date cannot be before the start date.');
     }
-    await db.update(issues).set(set).where(eq(issues.id, data.issueId));
+    let descriptionVersion: number | undefined;
+    if (data.description !== undefined) {
+      // Compare-and-set in one statement, so two saves at the same instant cannot both win.
+      set.descriptionVersion = sql`${issues.descriptionVersion} + 1`;
+      const where =
+        data.descriptionBaseVersion === undefined
+          ? eq(issues.id, data.issueId)
+          : and(
+              eq(issues.id, data.issueId),
+              eq(issues.descriptionVersion, data.descriptionBaseVersion),
+            );
+      const saved = await db
+        .update(issues)
+        .set(set)
+        .where(where)
+        .returning({ version: issues.descriptionVersion });
+      if (saved.length === 0) {
+        const [latest] = await db
+          .select({ description: issues.description, version: issues.descriptionVersion })
+          .from(issues)
+          .where(eq(issues.id, data.issueId));
+        return {
+          ok: false as const,
+          conflict: { description: latest?.description ?? '', version: latest?.version ?? 0 },
+        };
+      }
+      descriptionVersion = saved[0]?.version;
+    } else {
+      await db.update(issues).set(set).where(eq(issues.id, data.issueId));
+    }
 
     if (data.labelIds !== undefined) {
       await db.delete(issueLabels).where(eq(issueLabels.issueId, data.issueId));
@@ -1019,7 +1193,8 @@ export const updateIssueFn = createServerFn({ method: 'POST' })
         });
       }
     }
-    return { ok: true as const };
+    await issueChanged(issue.workspaceId, data.issueId);
+    return { ok: true as const, descriptionVersion };
   });
 
 /** Returns the project id when it belongs to the workspace; throws otherwise. */
@@ -1037,10 +1212,67 @@ export const deleteIssueFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
-    await requireIssue(data.issueId, me.id);
-    await db.update(issues).set({ parentIssueId: null }).where(eq(issues.parentIssueId, data.issueId));
-    await db.delete(issues).where(eq(issues.id, data.issueId));
+    const issue = await requireIssue(data.issueId, me.id);
+    if (issue.createdBy !== me.id && !isAdminRole(issue.role)) {
+      throw new Error('Only the person who created this issue or a workspace admin can delete it.');
+    }
+    // Soft delete: the issue goes to the trash for 30 days and can be restored with everything on it.
+    await db
+      .update(issues)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(eq(issues.id, data.issueId));
+    await recordIssueEvent(data.issueId, me.id, 'deleted');
+    await issueChanged(issue.workspaceId, data.issueId);
     return { ok: true as const };
+  });
+
+export const restoreIssueFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ issueId: z.string() }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const issue = await requireIssue(data.issueId, me.id, { allowDeleted: true });
+    if (!issue.deletedAt) return { ok: true as const };
+    if (issue.createdBy !== me.id && !isAdminRole(issue.role)) {
+      throw new Error('Only the person who created this issue or a workspace admin can restore it.');
+    }
+    await db.update(issues).set({ deletedAt: null }).where(eq(issues.id, data.issueId));
+    await recordIssueEvent(data.issueId, me.id, 'restored');
+    await issueChanged(issue.workspaceId, data.issueId);
+    return { ok: true as const };
+  });
+
+const TRASH_DAYS = 30;
+
+/** Issues deleted in the last 30 days, newest first, for the Trash page. */
+export const getTrashFn = createServerFn({ method: 'GET' })
+  .validator(z.object({ slug: z.string() }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const { workspace, membership } = await workspaceForSlug(data.slug, me.id);
+    const rows = await db
+      .select({ ...issueSelection, deletedAt: issues.deletedAt, createdBy: issues.createdBy })
+      .from(issues)
+      .innerJoin(teams, eq(teams.id, issues.teamId))
+      .leftJoin(projects, eq(projects.id, issues.projectId))
+      .innerJoin(taskStatuses, eq(taskStatuses.id, issues.status))
+      .leftJoin(users, eq(users.id, issues.assigneeId))
+      .where(and(eq(issues.workspaceId, workspace.id), isNotNull(issues.deletedAt)))
+      .orderBy(desc(issues.deletedAt))
+      .limit(100);
+    return {
+      canRestoreAll: isAdminRole(membership.role),
+      meId: me.id,
+      issues: rows.map((row) => ({
+        ...toIssue(row, [], 0),
+        deletedAt: row.deletedAt ?? '',
+        createdBy: row.createdBy,
+        purgeAt: new Date(
+          new Date(row.deletedAt ?? Date.now()).getTime() + TRASH_DAYS * 86_400_000,
+        ).toISOString(),
+      })),
+    };
   });
 
 export const addTaskCommentFn = createServerFn({ method: 'POST' })
@@ -1082,6 +1314,7 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
         authorName: users.name,
         authorEmail: users.email,
         authorAvatarColor: users.avatarColor,
+        authorAvatarKey: users.avatarKey,
         authorTitle: users.title,
         authorStatusEmoji: users.statusEmoji,
         authorStatusText: users.statusText,
@@ -1090,6 +1323,7 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
       .from(issueComments)
       .innerJoin(users, eq(users.id, issueComments.userId))
       .where(eq(issueComments.id, commentId));
+    await issueChanged(issue.workspaceId, data.issueId);
     return { comment: toComment(row) };
   });
 
@@ -1132,6 +1366,7 @@ export const createLabelFn = createServerFn({ method: 'POST' })
         .values({ issueId: data.issueId, labelId: label.id })
         .onConflictDoNothing();
     }
+    await issueChanged(workspace.id, data.issueId);
     return { label, created };
   });
 
@@ -1164,6 +1399,7 @@ export const updateLabelFn = createServerFn({ method: 'POST' })
     if (Object.keys(set).length > 0) {
       await db.update(labels).set(set).where(eq(labels.id, data.labelId));
     }
+    await issueChanged(label.workspaceId);
     return { ok: true as const };
   });
 
@@ -1174,8 +1410,9 @@ export const deleteLabelFn = createServerFn({ method: 'POST' })
     if (!me) throw new Error('Sign in required.');
     const [label] = await db.select().from(labels).where(eq(labels.id, data.labelId));
     if (!label) throw new Error('Label not found.');
-    await requireWorkspace(label.workspaceId, me.id);
+    await requireAdmin(label.workspaceId, me.id, 'delete labels');
     await db.delete(labels).where(eq(labels.id, data.labelId));
+    await issueChanged(label.workspaceId);
     return { ok: true as const };
   });
 
@@ -1192,6 +1429,7 @@ export const createTaskStatusFn = createServerFn({ method: 'POST' })
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
+    await requireAdmin(workspace.id, me.id, 'change the workflow');
     const duplicate = statuses.some(
       (status) => status.name.toLowerCase() === data.name.toLowerCase(),
     );
@@ -1206,6 +1444,7 @@ export const createTaskStatusFn = createServerFn({ method: 'POST' })
       color: data.color,
       position,
     });
+    await issueChanged(workspace.id);
     return {
       status: {
         id,
@@ -1231,7 +1470,7 @@ export const updateTaskStatusFn = createServerFn({ method: 'POST' })
     if (!me) throw new Error('Sign in required.');
     const [status] = await db.select().from(taskStatuses).where(eq(taskStatuses.id, data.statusId));
     if (!status) throw new Error('Status not found.');
-    await requireWorkspace(status.workspaceId, me.id);
+    await requireAdmin(status.workspaceId, me.id, 'change the workflow');
     if (data.name && data.name.toLowerCase() !== status.name.toLowerCase()) {
       const rows = await db
         .select({ id: taskStatuses.id, name: taskStatuses.name })
@@ -1248,6 +1487,7 @@ export const updateTaskStatusFn = createServerFn({ method: 'POST' })
     if (Object.keys(set).length > 0) {
       await db.update(taskStatuses).set(set).where(eq(taskStatuses.id, data.statusId));
     }
+    await issueChanged(status.workspaceId);
     return { ok: true as const };
   });
 
@@ -1257,6 +1497,7 @@ export const reorderTaskStatusesFn = createServerFn({ method: 'POST' })
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
+    await requireAdmin(workspace.id, me.id, 'change the workflow');
     const currentIds = new Set(statuses.map((status) => status.id));
     if (
       data.statusIds.length !== statuses.length ||
@@ -1274,6 +1515,7 @@ export const reorderTaskStatusesFn = createServerFn({ method: 'POST' })
           ),
       ),
     );
+    await issueChanged(workspace.id);
     return { ok: true as const };
   });
 
@@ -1289,7 +1531,7 @@ export const deleteTaskStatusFn = createServerFn({ method: 'POST' })
     if (!me) throw new Error('Sign in required.');
     const [status] = await db.select().from(taskStatuses).where(eq(taskStatuses.id, data.statusId));
     if (!status) throw new Error('Status not found.');
-    await requireWorkspace(status.workspaceId, me.id);
+    await requireAdmin(status.workspaceId, me.id, 'change the workflow');
 
     const rows = await db
       .select()
@@ -1323,6 +1565,7 @@ export const deleteTaskStatusFn = createServerFn({ method: 'POST' })
     }
 
     await db.delete(taskStatuses).where(eq(taskStatuses.id, status.id));
+    await issueChanged(status.workspaceId);
     return { moved: count };
   });
 
@@ -1343,6 +1586,7 @@ export const createTeamFn = createServerFn({ method: 'POST' })
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const { workspace } = await workspaceForSlug(data.slug, me.id);
+    await requireAdmin(workspace.id, me.id, 'create teams');
     const [taken] = await db
       .select({ id: teams.id })
       .from(teams)
@@ -1357,6 +1601,7 @@ export const createTeamFn = createServerFn({ method: 'POST' })
       color: data.color ?? colorForLabel(data.name),
       createdBy: me.id,
     });
+    await issueChanged(workspace.id);
     return { id, key: data.key };
   });
 
@@ -1396,6 +1641,7 @@ export const createProjectFn = createServerFn({ method: 'POST' })
       targetDate: data.targetDate ?? null,
       createdBy: me.id,
     });
+    await issueChanged(workspace.id);
     return { id };
   });
 
@@ -1429,6 +1675,7 @@ export const updateProjectFn = createServerFn({ method: 'POST' })
       .update(projects)
       .set({ ...changes, updatedAt: new Date().toISOString() })
       .where(eq(projects.id, projectId));
+    await issueChanged(project.workspaceId);
     return { ok: true as const };
   });
 
@@ -1439,10 +1686,11 @@ export const deleteProjectFn = createServerFn({ method: 'POST' })
     if (!me) throw new Error('Sign in required.');
     const [project] = await db.select().from(projects).where(eq(projects.id, data.projectId));
     if (!project) throw new Error('Project not found.');
-    await requireWorkspace(project.workspaceId, me.id);
+    await requireAdmin(project.workspaceId, me.id, 'delete projects');
     // Issues stay; they just leave the project (the foreign key also does this on delete).
     await db.update(issues).set({ projectId: null }).where(eq(issues.projectId, data.projectId));
     await db.delete(projects).where(eq(projects.id, data.projectId));
+    await issueChanged(project.workspaceId);
     return { ok: true as const };
   });
 

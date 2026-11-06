@@ -3,90 +3,34 @@ import { db, eq } from 'void/db';
 import { linkPreviews } from '@schema';
 import { readSessionUser } from '../lib/session';
 import {
+  fetchGuarded,
   isSafePreviewUrl,
   parseLinkPreview,
+  readCapped,
   type LinkPreviewData,
 } from '../lib/link-preview';
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_HTML_BYTES = 600_000;
-const MAX_REDIRECTS = 3;
+/** One budget for DNS, every redirect hop and reading the body, so a slow-drip server cannot hold a request open. */
+const FETCH_DEADLINE_MS = 7000;
 
-async function readCapped(response: Response, maxBytes: number) {
-  const declared = Number(response.headers.get('content-length') ?? '0');
-  if (Number.isFinite(declared) && declared > maxBytes) throw new Error('Page is too large.');
-  const reader = response.body?.getReader();
-  if (!reader) return (await response.text()).slice(0, maxBytes);
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    const remaining = maxBytes - size;
-    if (value.byteLength > remaining) {
-      chunks.push(value.subarray(0, remaining));
-      size = maxBytes;
-      await reader.cancel();
-      break;
-    }
-    chunks.push(value);
-    size += value.byteLength;
-  }
-  const merged = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder('utf-8', { fatal: false }).decode(merged);
-}
-
-async function fetchPreview(target: string): Promise<LinkPreviewData | null> {
-  let current = target;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    if (!isSafePreviewUrl(current)) return null;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 7000);
-    let response: Response;
-    try {
-      response = await fetch(current, {
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: {
-          accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.4',
-          'accept-language': 'en-US,en;q=0.8',
-        },
-      });
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (!location) return null;
-      try {
-        current = new URL(location, current).href;
-      } catch {
+function fetchPreview(target: string): Promise<LinkPreviewData | null> {
+  return fetchGuarded(target, {
+    accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.4',
+    deadlineMs: FETCH_DEADLINE_MS,
+    read: async (response, finalUrl) => {
+      const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+      if (contentType && !contentType.includes('text/html') && !contentType.includes('xhtml')) {
+        await response.body?.cancel();
         return null;
       }
-      continue;
-    }
-    if (!response.ok) return null;
-    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
-    if (contentType && !contentType.includes('text/html') && !contentType.includes('xhtml')) {
-      return null;
-    }
-    try {
-      const html = await readCapped(response, MAX_HTML_BYTES);
-      const preview = parseLinkPreview(html, current);
+      const bytes = await readCapped(response, MAX_HTML_BYTES, 'truncate');
+      const html = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      const preview = parseLinkPreview(html, finalUrl);
       return preview ? { ...preview, url: target } : null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
+    },
+  });
 }
 
 async function cachedPreview(url: string) {

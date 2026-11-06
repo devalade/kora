@@ -9,6 +9,7 @@ import {
   Plus,
   Settings2,
   Tag,
+  Trash2,
   UserRound,
   X,
 } from 'lucide-react';
@@ -44,7 +45,7 @@ export function TasksSidebar({
   activeTeam?: string;
   activeProject?: string;
   /** Pages that are not a filtered issue list, like the Projects page. */
-  activeSection?: 'projects';
+  activeSection?: 'projects' | 'trash';
   activeLabel?: string;
   activeStatus?: string;
   onCommand?: () => void;
@@ -66,6 +67,8 @@ export function TasksSidebar({
   }, []);
 
   const hiddenForA11y = !mobileOpen && !desktop;
+  // Workflow and teams change things for everyone, so only admins see those controls.
+  const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
 
   return (
     <>
@@ -191,7 +194,7 @@ export function TasksSidebar({
                 title="Teams"
                 hint="Teams own the issue key, like KOR-12"
                 actionLabel="New team"
-                onAction={() => setTeamDialogOpen(true)}
+                onAction={isAdmin ? () => setTeamDialogOpen(true) : undefined}
               />
               <div className="space-y-0.5">
                 {snapshot.teams.map((team) => (
@@ -291,14 +294,16 @@ export function TasksSidebar({
           </div>
 
           <div className="flex items-center gap-1 border-t border-sidebar-line p-2">
-            <button
-              type="button"
-              onClick={() => setStatusManagerOpen(true)}
-              aria-label="Manage statuses"
-              className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[12px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
-            >
-              <Settings2 size={13} /> Workflow
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setStatusManagerOpen(true)}
+                aria-label="Manage statuses"
+                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[12px] font-medium text-sidebar-text transition-colors duration-150 hover:bg-white/[0.06] hover:text-white"
+              >
+                <Settings2 size={13} /> Workflow
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setLabelManagerOpen(true)}
@@ -307,6 +312,19 @@ export function TasksSidebar({
             >
               <Tag size={13} /> Labels
             </button>
+            <Link
+              to="/app/$workspaceSlug/tasks/trash"
+              params={{ workspaceSlug: snapshot.workspace.slug }}
+              onClick={onCloseMobile}
+              className={cn(
+                'inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[12px] font-medium transition-colors duration-150',
+                activeSection === 'trash'
+                  ? 'bg-white/[0.07] text-white'
+                  : 'text-sidebar-text hover:bg-white/[0.06] hover:text-white',
+              )}
+            >
+              <Trash2 size={13} /> Trash
+            </Link>
           </div>
         </div>
       </aside>
@@ -344,11 +362,12 @@ function SectionHeader({
   title: string;
   hint: string;
   actionLabel: string;
-  onAction: () => void;
+  onAction?: () => void;
 }) {
   return (
-    <div className="mt-6 mb-1 flex items-center justify-between px-2" title={hint}>
+    <div className="mt-6 mb-1 flex h-6 items-center justify-between px-2" title={hint}>
       <p className="text-[12px] font-medium text-sidebar-text/80">{title}</p>
+      {onAction && (
       <button
         type="button"
         onClick={onAction}
@@ -358,6 +377,7 @@ function SectionHeader({
       >
         <Plus size={13} />
       </button>
+      )}
     </div>
   );
 }

@@ -22,6 +22,15 @@ async function settled(read, done = Boolean) {
   }
   return value;
 }
+// Polls an async condition instead of sleeping a fixed time; resolves true as soon as it holds.
+async function until(condition, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (await condition().catch(() => false)) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 const marker = `refs-${Date.now() % 100000}`;
 // KOR-2 is assigned to Amina and created by Alade, so Amina is its follower and Alade is the actor.
 const ISSUE_KEY = 'KOR-2';
@@ -70,6 +79,11 @@ const alade = await login('alade@kora.app');
 const amina = await login('amina@kora.app');
 const composer = alade.page.getByPlaceholder('Message #general');
 const menu = alade.page.getByRole('listbox', { name: 'Link an issue or channel' });
+// True once the composer holds exactly `text` with the caret at its end.
+const draftIs = (text) =>
+  until(() =>
+    composer.evaluate((el, expected) => el.value === expected && el.selectionStart === el.value.length, text),
+  );
 
 try {
   // 1. Autocomplete: `#KOR` lists issues, `#gen` lists the channel, `#kor2` finds KOR-2 by key.
@@ -88,7 +102,14 @@ try {
   await composer.pressSequentially(`-${ISSUE_NUMBER}`);
   await menu.getByRole('option', { name: new RegExp(`${ISSUE_KEY}\\b`) }).first().waitFor();
   await menu.getByRole('option', { name: new RegExp(`${ISSUE_KEY}\\b`) }).first().click();
-  await alade.page.waitForTimeout(200); // the caret moves on the next frame
+  // The composer inserts the key at once but moves the caret in a LATER animation frame. The value
+  // and caret already look right before that frame runs, so also wait for two frames: callbacks run
+  // in the order they were queued, which puts the composer's own callback before ours. Typing
+  // sooner lets its late caret move land in the middle of the next keystrokes.
+  await draftIs(`Please take a look\n${ISSUE_KEY} `);
+  await alade.page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
   check('menu closes after a pick', (await menu.count()) === 0);
   check(
     'plain key text inserted',
@@ -98,25 +119,37 @@ try {
 
   // Both sections together, then a key written without a dash, then clean up the draft.
   await composer.pressSequentially('#');
+  await draftIs(`Please take a look\n${ISSUE_KEY} #`);
   await menu.waitFor();
   check(
     '# alone shows channels and issues',
     (await menu.getByText('Channels', { exact: true }).count()) === 1 &&
       (await menu.getByText('Issues', { exact: true }).count()) === 1,
   );
+  // Every keystroke below waits for the composer to show the state it should produce before the
+  // next one, because the composer settles its caret in an animation frame and keys sent into the
+  // gap land in the wrong place.
+  const base1 = `Please take a look\n${ISSUE_KEY} `;
   await composer.press('Escape');
+  await menu.waitFor({ state: 'detached', timeout: 5000 });
   await composer.press('Backspace');
+  await draftIs(base1);
   await composer.pressSequentially('#kor2');
+  await draftIs(`${base1}#kor2`);
   await menu.getByRole('option', { name: /KOR-2\b/ }).first().waitFor();
   check('kor2 matches KOR-2', /KOR-2\b/.test(await menu.getByRole('option').first().innerText()));
   await composer.press('Escape');
+  await menu.waitFor({ state: 'detached', timeout: 5000 });
   for (let i = 0; i < 5; i++) await composer.press('Backspace');
+  await draftIs(base1);
   await composer.pressSequentially('#gen');
+  await draftIs(`${base1}#gen`);
   await menu.getByText('general', { exact: true }).waitFor();
   check('#gen suggests the channel', true);
   await composer.press('Escape');
+  await menu.waitFor({ state: 'detached', timeout: 5000 });
   for (let i = 0; i < 4; i++) await composer.press('Backspace');
-  check('draft restored', (await composer.inputValue()) === `Please take a look\n${ISSUE_KEY} `);
+  check('draft restored', await draftIs(base1), JSON.stringify(await composer.inputValue()));
   // The marker goes on the first line and an inline key renders a chip; the key alone on the
   // second line renders an embed card, so one message covers both forms.
   await composer.fill(`Please take a look ${marker} at ${ISSUE_KEY}\n${ISSUE_KEY}`);
@@ -141,10 +174,11 @@ try {
   sql(`update issues set status='${nextStatus}' where id='${issueId}'`);
   const nextName = sql(`select name from task_statuses where id='${nextStatus}' and workspace_id='ws-kora'`);
   let after = before;
-  for (let attempt = 0; attempt < 20 && !after.includes(nextName); attempt++) {
-    await amina.page.waitForTimeout(500);
+  // Amina's poll may have backed off to 8 seconds, so allow several polls.
+  await until(async () => {
     after = (await aminaChip.getAttribute('title')) ?? '';
-  }
+    return after.includes(nextName);
+  }, 30000);
   check('second account sees the status change', after.includes(nextName), `${before} -> ${after}`);
   check('embed card shows the new status', (await aminaRow.getByText(nextName, { exact: true }).count()) >= 1);
 
@@ -185,14 +219,24 @@ try {
   await aminaComposer.press('Enter');
   const parentRow = alade.page.locator('.message-row').filter({ hasText: `Thread parent ${marker}` });
   await parentRow.waitFor({ timeout: 15000 });
-  await parentRow.hover();
-  await parentRow.getByRole('button', { name: 'Reply in thread' }).click();
-  const reply = alade.page.getByPlaceholder('Reply in thread');
+  // The reply button only exists inside the hover toolbar and a poll can re-render the row between
+  // the hover and the click, so retry the pair until the thread panel is actually open.
+  const panel = alade.page.locator('aside').filter({ has: alade.page.getByRole('heading', { name: 'Thread' }) });
+  const panelOpen = await until(async () => {
+    await parentRow.hover({ timeout: 2000 });
+    await parentRow.getByRole('button', { name: 'Reply in thread' }).click({ timeout: 2000 });
+    await panel.waitFor({ timeout: 2000 });
+    return true;
+  }, 20000);
+  check('thread panel opened', panelOpen);
+  const reply = panel.getByPlaceholder('Reply in thread');
   await reply.waitFor();
-  await alade.page.waitForTimeout(1200); // the panel loads its thread before it accepts a reply
+  // The composer renders before the thread has loaded, and a reply sent in that gap is dropped
+  // silently (there is no parent yet). The header shows "N replies in #general" only once loaded.
+  await panel.getByText(/^\d+ repl(y|ies) in #/).waitFor({ timeout: 15000 });
   await reply.fill(`Thread answer ${marker} see ${ISSUE_KEY}`);
   await reply.press('Enter');
-  await alade.page.getByText(`Thread answer ${marker}`).waitFor({ timeout: 10000 });
+  await panel.getByText(`Thread answer ${marker}`).waitFor({ timeout: 10000 });
   const replyId = await settled(() => sql(`select id from messages where body like 'Thread answer ${marker}%'`));
   check(
     'thread reply notified the parent author',
@@ -210,7 +254,7 @@ try {
       (count) => count === '1',
     )) === '1',
   );
-  await alade.page.getByText(`Thread answer ${marker}`).locator('xpath=ancestor::article[1]').locator(`a[href$="/tasks/${ISSUE_KEY}"]`).first().waitFor({ timeout: 6000 });
+  await panel.getByText(`Thread answer ${marker}`).locator('xpath=ancestor::article[1]').locator(`a[href$="/tasks/${ISSUE_KEY}"]`).first().waitFor({ timeout: 10000 });
   check('chip renders in the thread panel', true);
 
   // 5. Unknown keys stay plain text.
@@ -218,7 +262,11 @@ try {
   await composer.press('Enter');
   const plain = alade.page.locator('.message-row').filter({ hasText: `ZZZ-99 ${marker}` });
   await plain.waitFor({ timeout: 10000 });
-  await alade.page.waitForTimeout(2500);
+  // Judge the server-rendered message after a reload, not an optimistic row that a later poll
+  // might still replace.
+  await settled(() => sql(`select id from messages where body like 'Nothing here: ZZZ-99 ${marker}%'`));
+  await alade.page.reload();
+  await plain.waitFor({ timeout: 15000 });
   check('unknown key is not a link', (await plain.locator('a').count()) === 0);
 
   // 6. Phone width.

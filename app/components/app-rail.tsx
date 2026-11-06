@@ -1,7 +1,8 @@
 import { Link } from '@tanstack/react-router';
 import { Inbox, ListTodo, LogOut, Map as MapIcon, MessageSquare } from 'lucide-react';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { getInboxCountFn } from '../lib/inbox';
+import { useLiveRefresh } from '../lib/realtime-client';
 import type { UserSummary } from '../lib/types';
 import { cn } from '../utils/cn';
 import { Avatar } from './avatar';
@@ -21,16 +22,15 @@ import { LogoMark } from './logo';
  *   `layout="auto"` is the column from 768px up and a bottom tab bar below it, for pages without a
  *   drawer. In that mode the bar is `fixed`, so give the page `pb-16` on phones.
  *
- * The rail polls the unread count every 15 s, pauses while the tab is hidden, and refreshes the
- * moment the tab shows again. A page that changes the count (the inbox) can call
- * `publishInboxUnread(n)` to update the badge at once.
+ * The unread badge refetches when the realtime socket reports an inbox change (see
+ * realtime-client.ts). A page that changes the count (the inbox) can call `publishInboxUnread(n)` to
+ * update the badge at once.
  */
 export type RailArea = 'inbox' | 'chat' | 'tasks' | 'studio';
 
 const UNREAD_EVENT = 'kora:inbox-unread';
-const POLL_MS = 15_000;
 
-/** Pushes a fresh unread count to every mounted AppRail without waiting for its next poll. */
+/** Pushes a fresh unread count to every mounted AppRail at once. */
 export function publishInboxUnread(unread: number) {
   window.dispatchEvent(new CustomEvent<number>(UNREAD_EVENT, { detail: unread }));
 }
@@ -38,31 +38,26 @@ export function publishInboxUnread(unread: number) {
 function useInboxUnread(workspaceSlug: string) {
   const [unread, setUnread] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function refresh() {
-      if (document.hidden) return;
-      try {
-        const result = await getInboxCountFn({ data: { slug: workspaceSlug } });
-        if (!cancelled) setUnread(result.unread);
-      } catch {
-        // A failed poll keeps the last count; the next tick tries again.
-      }
+  const refresh = useCallback(async () => {
+    try {
+      const result = await getInboxCountFn({ data: { slug: workspaceSlug } });
+      setUnread(result.unread);
+    } catch {
+      // Keep the last count; the next event or reconnect refetches it.
     }
+  }, [workspaceSlug]);
+
+  useEffect(() => {
     function onPublished(event: Event) {
       setUnread((event as CustomEvent<number>).detail);
     }
     void refresh();
-    const timer = window.setInterval(() => void refresh(), POLL_MS);
-    document.addEventListener('visibilitychange', refresh);
     window.addEventListener(UNREAD_EVENT, onPublished);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', refresh);
-      window.removeEventListener(UNREAD_EVENT, onPublished);
-    };
-  }, [workspaceSlug]);
+    return () => window.removeEventListener(UNREAD_EVENT, onPublished);
+  }, [refresh]);
+
+  // The badge moves when the realtime socket reports a new or read inbox item.
+  useLiveRefresh(workspaceSlug, refresh, (event) => event.t === 'inbox');
 
   return unread;
 }
@@ -77,7 +72,7 @@ export function AppRail({
 }: {
   workspaceSlug: string;
   active: RailArea;
-  me: Pick<UserSummary, 'name' | 'avatarColor'>;
+  me: Pick<UserSummary, 'name' | 'avatarColor'> & { avatarUrl?: string | null };
   onSignOut: () => void;
   onProfile?: () => void;
   layout?: 'column' | 'auto';
@@ -212,11 +207,11 @@ export function AppRail({
             aria-label="Your profile"
             title={me.name}
           >
-            <Avatar name={me.name} color={me.avatarColor} size="md" online className="[--avatar-ring:#151b19]" />
+            <Avatar name={me.name} src={me.avatarUrl} color={me.avatarColor} size="md" online className="[--avatar-ring:#151b19]" />
           </button>
         ) : (
           <span className="grid size-10 place-items-center" title={me.name}>
-            <Avatar name={me.name} color={me.avatarColor} size="md" online className="[--avatar-ring:#151b19]" />
+            <Avatar name={me.name} src={me.avatarUrl} color={me.avatarColor} size="md" online className="[--avatar-ring:#151b19]" />
           </span>
         )}
         <button

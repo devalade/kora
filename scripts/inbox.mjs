@@ -94,6 +94,8 @@ try {
 
   // Reset to a known state, then mark everything read.
   sql(`update notifications set read_at = null where id in ('${ids[0]}','${ids[1]}')`);
+  // A raw database write publishes no realtime event, so reload as a person would.
+  await page.reload({ waitUntil: 'networkidle' });
   await page.waitForFunction((n) => document.querySelector('[data-testid="inbox-badge"]')?.textContent === String(n), baseline + 2, { timeout: 15000 });
   await page.getByRole('button', { name: 'Mark all read' }).click();
   await badge.waitFor({ state: 'detached', timeout: 5000 });

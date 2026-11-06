@@ -8,9 +8,16 @@ import {
   VideoOff,
   X,
 } from 'lucide-react';
+import { useRealtime } from '../lib/realtime-client';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { heartbeatCallFn, leaveCallFn, pollCallSignalsFn, sendCallSignalFn } from '../lib/calls';
+import {
+  getIceServersFn,
+  heartbeatCallFn,
+  leaveCallFn,
+  pollCallSignalsFn,
+  sendCallSignalFn,
+} from '../lib/calls';
 import { callDuration } from '../lib/format';
 import type { CallView, UserSummary } from '../lib/types';
 import { Avatar } from './avatar';
@@ -26,20 +33,25 @@ const TURN_URL = import.meta.env.VITE_TURN_URL as string | undefined;
 const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME as string | undefined;
 const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined;
 
-const ICE_SERVERS: RTCIceServer[] = [
+/** Used only if the server cannot be asked: public STUN plus a build-time TURN relay, if configured. */
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:stun.l.google.com:19302' },
   ...(TURN_URL
     ? [{ urls: TURN_URL, username: TURN_USERNAME, credential: TURN_CREDENTIAL }]
     : []),
 ];
+/** Do not hold the call back longer than this waiting for TURN credentials. */
+const ICE_WAIT_MS = 6000;
 
 export function CallRoom({
+  workspaceSlug,
   call,
   me,
   channelName,
   onLeave,
 }: {
+  workspaceSlug: string;
   call: CallView;
   me: UserSummary;
   channelName: string;
@@ -52,6 +64,8 @@ export function CallRoom({
   const [sharing, setSharing] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [iceServers, setIceServers] = useState<RTCIceServer[] | null>(null);
+  const iceServersRef = useRef<RTCIceServer[]>(FALLBACK_ICE_SERVERS);
   const localVideo = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenRef = useRef<MediaStream | null>(null);
@@ -60,6 +74,7 @@ export function CallRoom({
   const cameraRef = useRef(true);
   const sharingRef = useRef(false);
   const signalQueue = useRef<Promise<void>>(Promise.resolve());
+  const pollSignals = useRef<() => void>(() => undefined);
   const leftRef = useRef(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -123,6 +138,25 @@ export function CallRoom({
     }
   }, [localStream]);
 
+  // TURN credentials come from the server (short-lived when Cloudflare TURN is configured). Peer
+  // connections wait for these as well as for the local media stream.
+  useEffect(() => {
+    let active = true;
+    const settle = (servers: RTCIceServer[]) => {
+      if (!active || iceServersRef.current !== FALLBACK_ICE_SERVERS) return;
+      iceServersRef.current = servers;
+      setIceServers(servers);
+    };
+    const giveUp = setTimeout(() => settle(FALLBACK_ICE_SERVERS), ICE_WAIT_MS);
+    void getIceServersFn()
+      .then((result) => settle(result.iceServers))
+      .catch(() => settle(FALLBACK_ICE_SERVERS));
+    return () => {
+      active = false;
+      clearTimeout(giveUp);
+    };
+  }, []);
+
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -141,12 +175,19 @@ export function CallRoom({
       }).catch(() => undefined);
     };
     send();
-    const timer = setInterval(send, 3000);
+    // Keeps this person in the call (the server drops anyone silent for 2 minutes). Mute, camera and
+    // screen changes are sent at once by the effect below, and pushed to the others.
+    const timer = setInterval(send, 20_000);
     return () => clearInterval(timer);
   }, [call.id, localStream]);
 
   useEffect(() => {
     if (!localStream) return;
+    void heartbeatCallFn({ data: { callId: call.id, muted, cameraOn, sharing } }).catch(() => undefined);
+  }, [call.id, localStream, muted, cameraOn, sharing]);
+
+  useEffect(() => {
+    if (!localStream || !iceServers) return;
     const poll = () => {
       signalQueue.current = signalQueue.current
         .then(async () => {
@@ -157,14 +198,21 @@ export function CallRoom({
         })
         .catch(() => undefined);
     };
+    pollSignals.current = poll;
     poll();
-    const timer = setInterval(poll, 500);
-    return () => clearInterval(timer);
+    return () => {
+      pollSignals.current = () => undefined;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [call.id, me.id, localStream]);
+  }, [call.id, me.id, localStream, iceServers]);
+
+  // Offers, answers and ICE candidates are pushed: fetch them the moment the socket says so.
+  useRealtime(workspaceSlug, (event) => {
+    if (event.t === 'sync' || (event.t === 'signal' && event.call === call.id)) pollSignals.current();
+  });
 
   useEffect(() => {
-    if (!localStream) return;
+    if (!localStream || !iceServers) return;
     const others = call.participants.filter((participant) => participant.userId !== me.id);
     for (const participant of others) {
       if (!peersRef.current.has(participant.userId)) {
@@ -175,10 +223,10 @@ export function CallRoom({
       if (!others.some((participant) => participant.userId === userId)) closePeer(userId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [call.participants, me.id, localStream]);
+  }, [call.participants, me.id, localStream, iceServers]);
 
   useEffect(() => {
-    if (!localStream) return;
+    if (!localStream || !iceServers) return;
     const timer = setInterval(() => {
       const others = call.participants.filter((participant) => participant.userId !== me.id);
       for (const participant of others) {
@@ -195,7 +243,7 @@ export function CallRoom({
     }, 1500);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [call.participants, me.id, localStream]);
+  }, [call.participants, me.id, localStream, iceServers]);
 
   function closePeer(userId: string) {
     const peer = peersRef.current.get(userId);
@@ -211,7 +259,7 @@ export function CallRoom({
 
   async function createPeer(userId: string, initiator: boolean) {
     if (peersRef.current.has(userId)) return peersRef.current.get(userId)!;
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
     const peer: Peer = { pc, pending: [], createdAt: Date.now() };
     peersRef.current.set(userId, peer);
 
@@ -434,6 +482,7 @@ export function CallRoom({
           <VideoTile
             label={`${me.name} (you)`}
             color={me.avatarColor}
+            avatarUrl={me.avatarUrl}
             stream={localStream}
             muted
             cameraOn={cameraOn}
@@ -445,6 +494,7 @@ export function CallRoom({
               key={participant.userId}
               label={participant.name}
               color={participant.avatarColor}
+              avatarUrl={participant.avatarUrl}
               stream={remoteStreams[participant.userId] ?? null}
               muted={participant.muted}
               cameraOn={participant.cameraOn}
@@ -523,6 +573,7 @@ function ControlButton({
 function VideoTile({
   label,
   color,
+  avatarUrl,
   stream,
   muted,
   cameraOn,
@@ -531,6 +582,7 @@ function VideoTile({
 }: {
   label: string;
   color: string;
+  avatarUrl?: string | null;
   stream: MediaStream | null;
   muted?: boolean;
   cameraOn: boolean;
@@ -566,7 +618,7 @@ function VideoTile({
       {!hasVideo && (
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center gap-3">
-            <Avatar name={label} color={color} size="2xl" />
+            <Avatar name={label} color={color} src={avatarUrl} size="2xl" />
             <span className="text-xs text-white/45">Camera off</span>
           </div>
         </div>

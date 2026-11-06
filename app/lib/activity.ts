@@ -1,7 +1,8 @@
 // Server-only: the issue history line and the inbox. Client code never imports this file.
-import { and, db, eq, inArray } from 'void/db';
+import { and, db, eq, inArray, isNull } from 'void/db';
 import { issueComments, issueEvents, issues, notifications, teams } from '@schema';
 import { newId } from './ids';
+import { publish, toUser } from './realtime';
 import type { IssueEventKind, NotificationKind } from './types';
 
 /** Appends one line to an issue's history. Values are short strings (a status id, a name, a date). */
@@ -69,6 +70,7 @@ export async function notify({
       body: body.slice(0, 280),
     })),
   );
+  await publish(workspaceId, recipients.map((userId) => toUser(userId, { t: 'inbox' })));
 }
 
 const ISSUE_KEY = /\b([A-Z][A-Z0-9]{1,4})-(\d{1,6})\b/g;
@@ -96,6 +98,7 @@ export async function issueIdsForKeys(workspaceId: string, keys: string[]) {
     .where(
       and(
         eq(issues.workspaceId, workspaceId),
+        isNull(issues.deletedAt),
         inArray(teams.key, [...new Set(parsed.map((item) => item.teamKey))]),
         inArray(issues.number, [...new Set(parsed.map((item) => item.number))]),
       ),

@@ -1,0 +1,15 @@
+// The Kora realtime worker: one Durable Object per workspace holds every open WebSocket of that
+// workspace (hibernation API, so idle sockets cost nothing) and fans out "this changed" events that
+// the app publishes after each write. It carries no message content, only what changed and where.
+// Deployed by `npm run deploy` (see README, realtime).
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "kora-realtime",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-24",
+  "routes": [{ "pattern": "realtime.kora.zecreator.com", "custom_domain": true }],
+  "vars": { "APP_ORIGIN": "https://kora.zecreator.com" },
+  "durable_objects": { "bindings": [{ "name": "HUB", "class_name": "WorkspaceHub" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkspaceHub"] }],
+  "observability": { "enabled": true }
+}

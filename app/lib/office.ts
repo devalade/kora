@@ -14,8 +14,9 @@ import {
 } from '@schema';
 import { z } from 'zod';
 import { newId } from './ids';
-import { toUserSummary } from './people';
+import { avatarUrlFor, toUserSummary } from './people';
 import { memberUsers, requireWorkspace, touchPresence } from './server';
+import { publish, toChannel, toWorkspace } from './realtime';
 import { readSessionUser } from './session';
 import type { CallView, OfficeActivity, OfficePerson, OfficeSnapshot, OfficeStatus } from './types';
 
@@ -89,6 +90,7 @@ async function officeActiveCall(channelId: string): Promise<CallView | null> {
       userId: callParticipants.userId,
       name: users.name,
       avatarColor: users.avatarColor,
+      avatarKey: users.avatarKey,
       muted: callParticipants.muted,
       cameraOn: callParticipants.cameraOn,
       sharing: callParticipants.sharing,
@@ -121,6 +123,7 @@ async function officeActiveCall(channelId: string): Promise<CallView | null> {
       userId: row.userId,
       name: row.name,
       avatarColor: row.avatarColor,
+      avatarUrl: avatarUrlFor(row.userId, row.avatarKey),
       muted: row.muted,
       cameraOn: row.cameraOn,
       sharing: row.sharing,
@@ -245,6 +248,7 @@ export const getOfficeFn = createServerFn({ method: 'GET' })
           authorName: users.name,
           authorEmail: users.email,
           authorAvatarColor: users.avatarColor,
+          authorAvatarKey: users.avatarKey,
           authorTitle: users.title,
           authorStatusEmoji: users.statusEmoji,
           authorStatusText: users.statusText,
@@ -296,6 +300,7 @@ export const getOfficeFn = createServerFn({ method: 'GET' })
         name: row.authorName,
         email: row.authorEmail,
         avatarColor: row.authorAvatarColor,
+        avatarKey: row.authorAvatarKey,
         title: row.authorTitle,
         statusEmoji: row.authorStatusEmoji,
         statusText: row.authorStatusText,
@@ -406,6 +411,7 @@ export const updateOfficeFn = createServerFn({ method: 'POST' })
         nextActivity ? `Is now “${nextActivity}”` : 'Cleared their activity',
       );
     }
+    await publish(workspace.id, [toWorkspace({ t: 'workspace' })]);
 
     return { ok: true as const };
   });
@@ -445,6 +451,7 @@ export const joinStudioCallFn = createServerFn({ method: 'POST' })
         },
       });
     await logOfficeActivity(workspace.id, me.id, 'call', 'Joined the Studio huddle');
+    await publish(workspace.id, [toWorkspace({ t: 'workspace' }), toChannel(studio.id, { t: 'call', c: studio.id })]);
 
     return { callId, channelId: studio.id };
   });

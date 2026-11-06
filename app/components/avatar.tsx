@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { cn } from '../utils/cn';
 import { avatarTone, initials } from '../lib/people';
 
@@ -49,6 +50,7 @@ export function Avatar({
   online,
   className,
   ring,
+  src,
 }: {
   name: string;
   color: string;
@@ -56,8 +58,12 @@ export function Avatar({
   online?: boolean;
   className?: string;
   ring?: boolean;
+  /** Uploaded profile photo. Falls back to initials when missing or when it fails to load. */
+  src?: string | null;
 }) {
   const tone = avatarTone(name);
+  const [failed, setFailed] = useState<string | null>(null);
+  const photo = src && failed !== src ? src : null;
 
   return (
     <span className={cn('relative inline-grid shrink-0 rounded-full', outerSizes[size], className)}>
@@ -78,7 +84,19 @@ export function Avatar({
           )}
           style={{ background: tone.bg, color: tone.fg }}
         >
-          {initials(name)}
+          {photo ? (
+            <img
+              src={photo}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              onError={() => setFailed(photo)}
+              className="size-full rounded-full object-cover"
+            />
+          ) : (
+            initials(name)
+          )}
         </span>
       </span>
       {online !== undefined && (
@@ -101,7 +119,7 @@ export function AvatarStack({
   max = 4,
   size = 'sm',
 }: {
-  people: { id: string; name: string; avatarColor: string }[];
+  people: { id: string; name: string; avatarColor: string; avatarUrl?: string | null }[];
   max?: number;
   size?: keyof typeof outerSizes;
 }) {
@@ -110,7 +128,14 @@ export function AvatarStack({
   return (
     <div className="flex -space-x-2">
       {shown.map((person) => (
-        <Avatar key={person.id} name={person.name} color={person.avatarColor} size={size} ring />
+        <Avatar
+          key={person.id}
+          name={person.name}
+          color={person.avatarColor}
+          src={person.avatarUrl}
+          size={size}
+          ring
+        />
       ))}
       {rest > 0 && (
         <span className="grid size-8 place-items-center rounded-full bg-sage text-[11px] font-semibold text-ink-soft ring-2 ring-paper">

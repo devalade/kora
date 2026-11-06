@@ -9,6 +9,8 @@ export const users = sqliteTable('users', {
   name: text('name').notNull(),
   passwordHash: text('password_hash').notNull(),
   avatarColor: text('avatar_color').notNull().default('#D97757'),
+  // R2 key of an uploaded profile photo; null shows initials.
+  avatarKey: text('avatar_key'),
   title: text('title').notNull().default(''),
   statusEmoji: text('status_emoji').notNull().default(''),
   statusText: text('status_text').notNull().default(''),
@@ -26,7 +28,22 @@ export const sessions = sqliteTable(
     expiresAt: text('expires_at').notNull(),
     createdAt: text('created_at').notNull().default(nowIso),
   },
-  (table) => [index('sessions_user_idx').on(table.userId)],
+  (table) => [
+    index('sessions_user_idx').on(table.userId),
+    index('sessions_expires_idx').on(table.expiresAt),
+  ],
+);
+
+// Failed sign-ins per key (an email or an IP address) inside a sliding window, for rate limiting.
+export const loginAttempts = sqliteTable(
+  'login_attempts',
+  {
+    key: text('key').primaryKey(),
+    failures: integer('failures').notNull().default(0),
+    windowStart: text('window_start').notNull(),
+    lockedUntil: text('locked_until'),
+  },
+  (table) => [index('login_attempts_window_idx').on(table.windowStart)],
 );
 
 export const workspaces = sqliteTable('workspaces', {
@@ -153,7 +170,11 @@ export const attachments = sqliteTable(
     storageKey: text('storage_key').notNull(),
     createdAt: text('created_at').notNull().default(nowIso),
   },
-  (table) => [index('attachments_message_idx').on(table.messageId)],
+  (table) => [
+    index('attachments_message_idx').on(table.messageId),
+    // Per-user storage quota and cleanup of uploads that never got attached to a message.
+    index('attachments_uploader_idx').on(table.uploaderId, table.messageId),
+  ],
 );
 
 export const linkPreviews = sqliteTable('link_previews', {
@@ -353,9 +374,14 @@ export const issues = sqliteTable(
       .references(() => users.id),
     createdAt: text('created_at').notNull().default(nowIso),
     updatedAt: text('updated_at').notNull().default(nowIso),
+    // Deleting moves an issue to the trash for 30 days so it can be restored.
+    deletedAt: text('deleted_at'),
+    // Bumped on every description save; a save based on an older version is a conflict.
+    descriptionVersion: integer('description_version').notNull().default(0),
   },
   (table) => [
     uniqueIndex('issues_team_number_idx').on(table.teamId, table.number),
+    index('issues_deleted_idx').on(table.workspaceId, table.deletedAt),
     index('issues_project_idx').on(table.projectId),
     index('issues_workspace_status_idx').on(table.workspaceId, table.status),
     index('issues_assignee_idx').on(table.assigneeId),

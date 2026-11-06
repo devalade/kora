@@ -18,6 +18,8 @@ export function LabelManagerDialog({
   snapshot: TasksSnapshot;
 }) {
   const router = useRouter();
+  // Deleting a label removes it from every issue, so it is an admin action.
+  const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
   const [names, setNames] = useState<Record<string, string>>({});
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -163,6 +165,7 @@ export function LabelManagerDialog({
                 <span className="hidden w-16 text-right text-[11px] text-faint sm:block">
                   {count} {count === 1 ? 'issue' : 'issues'}
                 </span>
+                {isAdmin && (
                 <button
                   type="button"
                   onClick={() => void removeLabel(label)}
@@ -176,6 +179,7 @@ export function LabelManagerDialog({
                     <Trash2 size={14} />
                   )}
                 </button>
+                )}
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2 pl-6">
                 <div className="flex items-center gap-2">

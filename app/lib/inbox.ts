@@ -1,9 +1,19 @@
 import { createServerFn } from '@tanstack/react-start';
-import { and, db, desc, eq, inArray, isNull, sql } from 'void/db';
-import { channels, issues, notifications, taskStatuses, teams, users, workspaces } from '@schema';
+import { and, db, desc, eq, inArray, isNotNull, isNull, lt, sql } from 'void/db';
+import {
+  channels,
+  issues,
+  notifications,
+  taskStatuses,
+  teams,
+  users,
+  workspaceMembers,
+  workspaces,
+} from '@schema';
 import { z } from 'zod';
+import { publish, toUser } from './realtime';
 import { toUserSummary } from './people';
-import { inChunks, requireWorkspace } from './server';
+import { inChunks } from './server';
 import { readSessionUser } from './session';
 import type {
   InboxItem,
@@ -15,6 +25,10 @@ import type {
 } from './types';
 
 const INBOX_LIMIT = 100;
+/** Read notifications older than this are deleted when their owner loads the inbox. */
+export const INBOX_RETENTION_DAYS = 90;
+/** At most this many rows go per load, so a first cleanup of a large backlog stays cheap. */
+const INBOX_PRUNE_BATCH = 100;
 const KINDS: NotificationKind[] = [
   'issue_assigned',
   'issue_status',
@@ -31,6 +45,7 @@ const userColumns = {
   name: users.name,
   email: users.email,
   avatarColor: users.avatarColor,
+  avatarKey: users.avatarKey,
   title: users.title,
   statusEmoji: users.statusEmoji,
   statusText: users.statusText,
@@ -40,13 +55,44 @@ const userColumns = {
 async function inboxContext(slug: string) {
   const me = await readSessionUser();
   if (!me) throw new Error('Sign in required.');
+  // Workspace and membership in one statement; the slow path only chooses the error message.
   const [workspace] = await db
     .select({ id: workspaces.id })
     .from(workspaces)
+    .innerJoin(
+      workspaceMembers,
+      and(eq(workspaceMembers.workspaceId, workspaces.id), eq(workspaceMembers.userId, me.id)),
+    )
     .where(eq(workspaces.slug, slug));
-  if (!workspace) throw new Error('Workspace not found.');
-  await requireWorkspace(workspace.id, me.id);
+  if (!workspace) {
+    const [exists] = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.slug, slug));
+    throw new Error(exists ? 'You are not a member of this workspace.' : 'Workspace not found.');
+  }
   return { me, workspaceId: workspace.id };
+}
+
+/**
+ * Opportunistic retention: deletes the user's read notifications older than 90 days, a bounded batch
+ * per call. Unread items are never touched, and issue history is a separate table that is not pruned.
+ */
+async function pruneReadNotifications(userId: string) {
+  const cutoff = new Date(Date.now() - INBOX_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  await db.delete(notifications).where(
+    inArray(
+      notifications.id,
+      db
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.userId, userId),
+            isNotNull(notifications.readAt),
+            lt(notifications.createdAt, cutoff),
+          ),
+        )
+        .limit(INBOX_PRUNE_BATCH),
+    ),
+  );
 }
 
 async function unreadCount(userId: string, workspaceId: string) {
@@ -64,9 +110,11 @@ async function unreadCount(userId: string, workspaceId: string) {
 }
 
 export const getInboxFn = createServerFn({ method: 'GET' })
-  .validator(z.object({ slug: z.string() }))
+  // `poll` marks background refreshes, which skip the cleanup; opening the inbox runs it.
+  .validator(z.object({ slug: z.string(), poll: z.boolean().optional() }))
   .handler(async ({ data }): Promise<{ items: InboxItem[]; unread: number }> => {
     const { me, workspaceId } = await inboxContext(data.slug);
+    if (!data.poll) await pruneReadNotifications(me.id).catch(() => undefined);
 
     const [rows, unread] = await Promise.all([
       db
@@ -186,5 +234,7 @@ export const markInboxReadFn = createServerFn({ method: 'POST' })
         .set({ readAt })
         .where(and(mine, inArray(notifications.id, data.ids)));
     }
+    // This person's other tabs update their inbox and badge.
+    await publish(workspaceId, [toUser(me.id, { t: 'inbox' })]);
     return { unread: await unreadCount(me.id, workspaceId) };
   });

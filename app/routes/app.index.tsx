@@ -103,7 +103,7 @@ function AppIndexPage() {
           </div>
           <div className="ml-auto flex items-center gap-3">
             <span className="hidden text-xs text-muted sm:block">{overview.me.email}</span>
-            <Avatar name={overview.me.name} color={overview.me.avatarColor} size="sm" online />
+            <Avatar name={overview.me.name} src={overview.me.avatarUrl} color={overview.me.avatarColor} size="sm" online />
             <button
               type="button"
               onClick={() => void signOut()}

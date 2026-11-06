@@ -13,6 +13,19 @@ function safeRedirect(value: unknown) {
     : undefined;
 }
 
+// Server errors arrive as plain messages (lockout, bad credentials) or, for failed validation, as
+// a JSON list of issues. Show the first readable message either way.
+function errorMessage(caught: unknown, fallback: string) {
+  if (!(caught instanceof Error)) return fallback;
+  try {
+    const issues: unknown = JSON.parse(caught.message);
+    if (Array.isArray(issues) && typeof issues[0]?.message === 'string') return issues[0].message;
+  } catch {
+    // Not JSON: the message is already readable.
+  }
+  return caught.message || fallback;
+}
+
 export const Route = createFileRoute('/signup')({
   validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
     redirect: safeRedirect(search.redirect),
@@ -44,7 +57,7 @@ function SignupPage() {
       if (search.redirect) window.location.assign(search.redirect);
       else await navigate({ to: '/app' });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not create the account.');
+      setError(errorMessage(caught, 'Could not create the account.'));
     } finally {
       setBusy(false);
     }
