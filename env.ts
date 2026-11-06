@@ -2,6 +2,8 @@ import { defineEnv, string } from 'void/env';
 
 export default defineEnv({
   KORA_APP_NAME: string().default('Kora'),
+  VITE_POSTHOG_PROJECT_TOKEN: string().default('phc_waodNqxAHdinHagdTrnpTvwzTfstKZxqNXq924MuQqeq'),
+  VITE_POSTHOG_HOST: string().default('https://eu.i.posthog.com'),
   // Optional Cloudflare Realtime TURN credentials for huddles. Set both as Worker secrets
   // (`void secret put`) to enable relayed calls; see README, huddles.
   CF_TURN_KEY_ID: string().optional(),

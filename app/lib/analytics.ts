@@ -1,11 +1,12 @@
-// Product analytics and client error reporting with PostHog. Client only; it does nothing until
-// VITE_POSTHOG_PROJECT_TOKEN is set, and it never runs in local development unless VITE_POSTHOG_DEV is set.
+// Product analytics and client error reporting with PostHog. Client only; it does nothing without
+// VITE_POSTHOG_PROJECT_TOKEN (env.ts), and it never runs in local development unless VITE_POSTHOG_DEV is set.
 //
 // Chat is private, so the setup is deliberately quiet: no session recording, every autocaptured
 // element's text and attributes are masked, and people are identified by their Kora id only (no
 // name or email is sent).
 
 import type { PostHog } from 'posthog-js';
+import { env } from 'void/env';
 
 type Identity = { id: string } | null | undefined;
 
@@ -15,7 +16,7 @@ let identifiedAs: string | null = null;
 
 function enabled() {
   if (typeof window === 'undefined') return false;
-  if (!import.meta.env.VITE_POSTHOG_PROJECT_TOKEN) return false;
+  if (!env.VITE_POSTHOG_PROJECT_TOKEN) return false;
   return !import.meta.env.DEV || Boolean(import.meta.env.VITE_POSTHOG_DEV);
 }
 
@@ -23,8 +24,8 @@ function load(): Promise<PostHog | null> {
   if (!enabled()) return Promise.resolve(null);
   loading ??= import('posthog-js')
     .then(({ default: posthog }) => {
-      posthog.init(import.meta.env.VITE_POSTHOG_PROJECT_TOKEN as string, {
-        api_host: (import.meta.env.VITE_POSTHOG_HOST as string | undefined) ?? 'https://us.i.posthog.com',
+      posthog.init(env.VITE_POSTHOG_PROJECT_TOKEN, {
+        api_host: env.VITE_POSTHOG_HOST,
         person_profiles: 'identified_only',
         capture_pageview: 'history_change',
         capture_exceptions: true,
