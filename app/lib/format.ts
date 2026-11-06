@@ -65,6 +65,18 @@ export function fileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+export const CALL_LIMIT_MINUTES = 5;
+export const CALL_LIMIT_MS = CALL_LIMIT_MINUTES * 60 * 1000;
+
+export function callTimeLeftMs(startedAt: string, now = Date.now()) {
+  return Math.max(0, new Date(startedAt).getTime() + CALL_LIMIT_MS - now);
+}
+
+export function callTimeLeft(startedAt: string, now = Date.now()) {
+  const seconds = Math.ceil(callTimeLeftMs(startedAt, now) / 1000);
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 export function callDuration(startedAt: string, now = Date.now()) {
   const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
   const minutes = Math.floor(seconds / 60);

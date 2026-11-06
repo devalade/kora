@@ -19,7 +19,7 @@ import { getSessionUserFn, signOutFn } from '../lib/auth';
 import { openDmFn } from '../lib/chat';
 import { getOfficeFn, joinStudioCallFn, updateOfficeFn } from '../lib/office';
 import type { OfficeActivity, OfficePerson, OfficeSnapshot, OfficeStatus } from '../lib/types';
-import { relativeTime } from '../lib/format';
+import { CALL_LIMIT_MINUTES, relativeTime } from '../lib/format';
 import { AppRail } from '../components/app-rail';
 import { CallRoom } from '../components/call-room';
 import { CreatureBadge, type CreatureMood } from '../components/studio/creature';
@@ -283,6 +283,7 @@ function OfficePage() {
             <button
               type="button"
               onClick={() => (joinedCall ? setCallOpen(true) : void joinCall())}
+              title={`Huddles last up to ${CALL_LIMIT_MINUTES} minutes`}
               aria-label={
                 joinedCall ? 'Return to call' : office.call ? 'Join huddle' : 'Start huddle'
               }

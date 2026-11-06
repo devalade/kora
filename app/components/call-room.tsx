@@ -18,7 +18,7 @@ import {
   pollCallSignalsFn,
   sendCallSignalFn,
 } from '../lib/calls';
-import { callDuration } from '../lib/format';
+import { CALL_LIMIT_MINUTES, callTimeLeft, callTimeLeftMs } from '../lib/format';
 import type { CallView, UserSummary } from '../lib/types';
 import { Avatar } from './avatar';
 import { cn } from '../utils/cn';
@@ -161,6 +161,18 @@ export function CallRoom({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const timeLeftMs = callTimeLeftMs(call.startedAt, now);
+  const lastMinute = timeLeftMs <= 60_000;
+  const timeUp = timeLeftMs === 0;
+  useEffect(() => {
+    if (lastMinute && !timeUp) toast('One minute left in this huddle.');
+  }, [lastMinute]);
+  useEffect(() => {
+    if (!timeUp || leftRef.current) return;
+    toast(`Huddles last up to ${CALL_LIMIT_MINUTES} minutes. Start a new one to keep talking.`);
+    void leave();
+  }, [timeUp]);
 
   useEffect(() => {
     if (!localStream) return;
@@ -442,7 +454,7 @@ export function CallRoom({
           <div>
             <h2 className="text-sm font-semibold">#{channelName}</h2>
             <p className="font-mono text-[11px] text-white/45">
-              {callDuration(call.startedAt, now)} · {call.participants.length} in the room
+              <span className={lastMinute ? 'text-[#FFB4A2]' : undefined}>{callTimeLeft(call.startedAt, now)} left</span> · {call.participants.length} in the room
             </p>
           </div>
         </div>

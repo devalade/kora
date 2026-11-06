@@ -5,6 +5,7 @@ import { env } from 'void/env';
 import { z } from 'zod';
 import { requireChannel, requireUser } from './server';
 import { newId } from './ids';
+import { CALL_LIMIT_MINUTES, callTimeLeftMs } from './format';
 import { publish, toChannel, toUser, toWorkspace } from './realtime';
 
 const STALE_MS = 120_000;
@@ -37,10 +38,17 @@ async function endCall(callId: string) {
   await db.delete(callSignals).where(eq(callSignals.callId, callId));
 }
 
+const LIMIT_REACHED = `This huddle reached its ${CALL_LIMIT_MINUTES} minute limit.`;
+
+function overLimit(call: { startedAt: string }) {
+  return callTimeLeftMs(call.startedAt) === 0;
+}
+
 async function reapStaleCall(channelId: string) {
   const callId = await activeCallId(channelId);
   if (!callId) return;
-  if ((await liveParticipantCount(callId)) === 0) await endCall(callId);
+  const [call] = await db.select({ startedAt: calls.startedAt }).from(calls).where(eq(calls.id, callId));
+  if ((call && overLimit(call)) || (await liveParticipantCount(callId)) === 0) await endCall(callId);
 }
 
 async function requireParticipant(callId: string, userId: string) {
@@ -115,6 +123,11 @@ export const heartbeatCallFn = createServerFn({ method: 'POST' })
     const [call] = await db.select().from(calls).where(eq(calls.id, data.callId));
     if (!call || call.endedAt) throw new Error('This call has ended.');
     const channel = await requireChannel(call.channelId, me.id);
+    if (overLimit(call)) {
+      await endCall(call.id);
+      await announceCall(channel.workspaceId, call.channelId);
+      throw new Error(LIMIT_REACHED);
+    }
     const [before] = await db
       .select({ muted: callParticipants.muted, cameraOn: callParticipants.cameraOn, sharing: callParticipants.sharing })
       .from(callParticipants)
@@ -175,6 +188,7 @@ export const sendCallSignalFn = createServerFn({ method: 'POST' })
     const me = await requireUser();
     const [call] = await db.select().from(calls).where(eq(calls.id, data.callId));
     if (!call || call.endedAt) throw new Error('This call has ended.');
+    if (overLimit(call)) throw new Error(LIMIT_REACHED);
     const channel = await requireChannel(call.channelId, me.id);
     await requireParticipant(data.callId, me.id);
 

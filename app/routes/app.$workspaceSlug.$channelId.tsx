@@ -46,7 +46,7 @@ import { showNotification } from '../lib/notifications';
 import { track } from '../lib/analytics';
 import { ThreadPanel } from '../components/thread-panel';
 import { WorkspaceSidebar } from '../components/workspace-sidebar';
-import { relativeTime } from '../lib/format';
+import { CALL_LIMIT_MINUTES, relativeTime } from '../lib/format';
 import { useLiveRefresh } from '../lib/realtime-client';
 import { cn } from '../utils/cn';
 
@@ -619,6 +619,7 @@ function WorkspacePage() {
             <button
               type="button"
               onClick={() => (joinedCall ? setCallOpen(true) : void joinHuddle())}
+              title={`Huddles last up to ${CALL_LIMIT_MINUTES} minutes`}
               className={cn(
                 'inline-flex h-9 items-center gap-2 rounded-[11px] border px-3 text-xs font-semibold transition-[background-color,border-color,color,transform] duration-150 ease-out active:scale-[0.96]',
                 joinedCall
@@ -722,6 +723,7 @@ function WorkspacePage() {
                     <span className="relative inline-flex size-2 rounded-full bg-mint-deep" />
                   </span>
                   <span className="font-medium">A huddle is live</span>
+                  <span className="text-xs text-mint-deep/80">{CALL_LIMIT_MINUTES} min max</span>
                   <span className="hidden text-xs text-mint-deep/80 sm:inline">
                     {snapshot.call.participants.map((person) => person.name.split(' ')[0]).join(', ')}
                   </span>

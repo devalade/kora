@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { chromium } from 'playwright';
 
 const base = 'http://localhost:5174';
@@ -86,12 +87,28 @@ await amina.page.getByRole('button', { name: 'Leave', exact: true }).click();
 await amina.page.waitForTimeout(2500);
 const aAfter = await alade.page.getByText(/in the room/i).innerText();
 
+const countdown = await alade.page.getByText(/\d\d:\d\d left/).first().innerText();
+if (!/^0[45]:\d\d left$/.test(countdown)) throw new Error(`expected a 5 minute countdown, got "${countdown}"`);
+
+execFileSync('npx', [
+  'void',
+  'db',
+  'execute',
+  "update calls set started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 minutes') where channel_id = 'ch-general' and ended_at is null",
+]);
+await alade.page.getByRole('button', { name: 'Mute', exact: true }).click();
+await alade.page.getByText('Huddle live').first().waitFor({ state: 'detached', timeout: 15000 });
+await amina.page.getByText('A huddle is live').waitFor({ state: 'detached', timeout: 15000 });
+const limitEnded = true;
+
 console.log(
   JSON.stringify(
     {
       aVideos,
       bVideos,
       aAfter,
+      countdown,
+      limitEnded,
       errors: [...alade.errors, ...amina.errors],
     },
     null,
