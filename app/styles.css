@@ -288,7 +288,7 @@
 }
 
 .message-row:hover .message-actions,
-.message-row:focus-within .message-actions,
+.message-row:has(:focus-visible) .message-actions,
 .message-row.is-active .message-actions {
   opacity: 1;
   pointer-events: auto;
@@ -296,6 +296,7 @@
 
 /* Touch screens have no hover: the bar shows on the row that was tapped (focus-within). */
 @media (hover: none) {
+  .message-row:focus-within .message-actions,
   .message-row:active .message-actions {
     opacity: 1;
     pointer-events: auto;
