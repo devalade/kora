@@ -15,6 +15,7 @@ import { getSessionUserFn } from '../lib/auth';
 import { Avatar } from '../components/avatar';
 import { LogoMark, Wordmark } from '../components/logo';
 import { RichText } from '../components/rich-text';
+import { DEMO_EMAIL, DEMO_PASSWORD } from '../lib/demo';
 
 export const Route = createFileRoute('/')({
   loader: async () => {
@@ -120,10 +121,10 @@ function LandingPage() {
             </div>
             <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-muted">
               <span className="inline-flex items-center gap-1.5">
-                <Check size={13} className="text-mint-deep" /> Demo: alade@kora.app
+                <Check size={13} className="text-mint-deep" /> Demo: {DEMO_EMAIL}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Check size={13} className="text-mint-deep" /> Password: demo1234
+                <Check size={13} className="text-mint-deep" /> Password: {DEMO_PASSWORD}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <Check size={13} className="text-mint-deep" /> No card

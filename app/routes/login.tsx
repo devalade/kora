@@ -3,6 +3,7 @@ import { ArrowRight, Loader2, LockKeyhole, Mail, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { getSessionUserFn, signInFn } from '../lib/auth';
 import { AuthLayout } from '../components/auth-layout';
+import { DEMO_EMAIL, DEMO_PASSWORD } from '../lib/demo';
 
 function safeRedirect(value: unknown) {
   return typeof value === 'string' &&
@@ -63,8 +64,8 @@ function LoginPage() {
   }
 
   function useDemo() {
-    setEmail('alade@kora.app');
-    setPassword('demo1234');
+    setEmail(DEMO_EMAIL);
+    setPassword(DEMO_PASSWORD);
     setError(null);
   }
 
@@ -95,7 +96,9 @@ function LoginPage() {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] font-semibold text-ink">Try the demo workspace</span>
-          <span className="block text-[11px] text-muted">alade@kora.app · demo1234</span>
+          <span className="block text-[11px] text-muted">
+            {DEMO_EMAIL} · {DEMO_PASSWORD}
+          </span>
         </span>
         <ArrowRight size={15} className="text-coral-deep" />
       </button>
