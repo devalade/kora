@@ -14,7 +14,7 @@
     "db:seed": "void db seed",
     "db:studio": "void db studio",
     "deploy": "npm run typecheck && npm run build && npm run check:migrations && void db migrate --remote && npm run deploy:realtime && void deploy --platform cloudflare",
-    "deploy:realtime": "wrangler deploy -c realtime/wrangler.jsonc"
+    "deploy:realtime": "node scripts/deploy-realtime.mjs"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.170.46",

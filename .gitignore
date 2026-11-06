@@ -10,3 +10,4 @@ dist
 .DS_Store
 .tanstack
 .dev.vars
+.wrangler.deploy.json

@@ -357,6 +357,58 @@ migrations (`ALTER TABLE ... ADD`, `RENAME`) instead.
 runs SQL against the deployed database except `npm run deploy`; avoid `void db execute --remote` for
 anything that writes.
 
+## Deploy your own
+
+Kora runs on your own Cloudflare account under a domain you own. You need a Cloudflare account,
+a domain on that account (the app takes `chat.example.com`, realtime takes
+`realtime.chat.example.com`), and Workers Paid if password reset emails must reach any address.
+
+1. Fork or clone the repository and install:
+
+   ```bash
+   git clone https://github.com/devalade/kora.git && cd kora
+   npm install
+   ```
+
+2. Delete `void.lock.json`. It holds the IDs of the original deploy (account, D1 database, R2
+   bucket); Void creates a new one for your account on the first deploy. Commit the new file
+   afterwards.
+
+3. Sign in:
+
+   ```bash
+   npx void auth login
+   npx wrangler login
+   ```
+
+4. Set the realtime secrets (same value on both Workers):
+
+   ```bash
+   openssl rand -base64 32
+   npx wrangler secret put REALTIME_SECRET -c realtime/wrangler.jsonc
+   npx void secret put REALTIME_SECRET
+   npx void secret put REALTIME_URL                                 # https://realtime.chat.example.com
+   ```
+
+5. Deploy with your domain. `VITE_KORA_DOMAIN` sets the app's custom domain, the realtime
+   domain, the sender of password reset emails (`noreply@chat.example.com`), and the links in
+   those emails:
+
+   ```bash
+   VITE_KORA_DOMAIN=chat.example.com npm run deploy
+   ```
+
+   Pass `VITE_KORA_DOMAIN` on every deploy. Builds ignore `VITE_*` values in `.env`, so put it in
+   your shell profile or CI variables.
+
+A copy on another domain has no public demo login and sends no analytics. To use PostHog, pass
+your own `VITE_POSTHOG_PROJECT_TOKEN` (and `VITE_POSTHOG_HOST`) next to `VITE_KORA_DOMAIN`.
+GitHub and TURN are optional and set up as in How GitHub works and How huddles work.
+
+Before you open it to others, replace what still names the original operator: the contact address
+in `app/components/legal-page.tsx`, the terms and privacy pages (`app/routes/terms.tsx`,
+`app/routes/privacy.tsx`), and the domain in `public/sitemap.xml` and `public/robots.txt`.
+
 ## Known limits
 
 - Realtime events are delivered at most once. A client that misses one (a deploy of the realtime worker drops every socket) catches up when it reconnects, a second or two later.

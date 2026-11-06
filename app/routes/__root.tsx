@@ -14,9 +14,8 @@ import { captureError, startAnalytics } from '../lib/analytics';
 import type { ReactNode } from 'react';
 import { Toaster } from 'sonner';
 import { getSessionUserFn } from '../lib/auth';
+import { siteOrigin } from '../lib/site';
 import '../styles.css';
-
-const SITE = 'https://kora.zecreator.com';
 
 export const Route = createRootRoute({
   head: () => ({
@@ -33,13 +32,13 @@ export const Route = createRootRoute({
       // Link previews in Slack, X, LinkedIn, iMessage and the like.
       { property: 'og:type', content: 'website' },
       { property: 'og:site_name', content: 'Kora' },
-      { property: 'og:url', content: SITE },
+      { property: 'og:url', content: siteOrigin() },
       { property: 'og:title', content: 'Kora · Team chat for people who ship' },
       {
         property: 'og:description',
         content: 'Channels, threads, huddles and Linear-style tasks in one calm room.',
       },
-      { property: 'og:image', content: `${SITE}/og.png` },
+      { property: 'og:image', content: `${siteOrigin()}/og.png` },
       { property: 'og:image:width', content: '1200' },
       { property: 'og:image:height', content: '630' },
       { property: 'og:image:alt', content: 'Kora: team chat for people who ship' },
@@ -49,7 +48,7 @@ export const Route = createRootRoute({
         name: 'twitter:description',
         content: 'Channels, threads, huddles and Linear-style tasks in one calm room.',
       },
-      { name: 'twitter:image', content: `${SITE}/og.png` },
+      { name: 'twitter:image', content: `${siteOrigin()}/og.png` },
     ],
     links: [
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },

@@ -52,7 +52,7 @@ function LoginPage() {
   }
 
   function useDemo() {
-    setEmail(DEMO_EMAIL);
+    setEmail(DEMO_EMAIL ?? '');
     setPassword(DEMO_PASSWORD);
     setError(null);
   }
@@ -74,22 +74,24 @@ function LoginPage() {
         </>
       }
     >
-      <button
-        type="button"
-        onClick={useDemo}
-        className="mb-5 flex w-full items-center gap-3 rounded-2xl border border-coral/25 bg-coral-soft/60 px-4 py-3 text-left transition hover:border-coral/50"
-      >
-        <span className="grid size-9 place-items-center rounded-xl bg-coral text-white">
-          <Sparkles size={16} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-semibold text-ink">Try the demo workspace</span>
-          <span className="block text-[11px] text-muted">
-            {DEMO_EMAIL} · {DEMO_PASSWORD}
+      {DEMO_EMAIL && (
+        <button
+          type="button"
+          onClick={useDemo}
+          className="mb-5 flex w-full items-center gap-3 rounded-2xl border border-coral/25 bg-coral-soft/60 px-4 py-3 text-left transition hover:border-coral/50"
+        >
+          <span className="grid size-9 place-items-center rounded-xl bg-coral text-white">
+            <Sparkles size={16} />
           </span>
-        </span>
-        <ArrowRight size={15} className="text-coral-deep" />
-      </button>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-semibold text-ink">Try the demo workspace</span>
+            <span className="block text-[11px] text-muted">
+              {DEMO_EMAIL} · {DEMO_PASSWORD}
+            </span>
+          </span>
+          <ArrowRight size={15} className="text-coral-deep" />
+        </button>
+      )}
 
       <form
         onSubmit={(event) => {

@@ -7,6 +7,7 @@
 
 import type { PostHog } from 'posthog-js';
 import { env } from 'void/env';
+import { isOriginalSite } from './site';
 
 type Identity = { id: string } | null | undefined;
 
@@ -17,6 +18,7 @@ let identifiedAs: string | null = null;
 function enabled() {
   if (typeof window === 'undefined') return false;
   if (!env.VITE_POSTHOG_PROJECT_TOKEN) return false;
+  if (!isOriginalSite() && !import.meta.env.VITE_POSTHOG_PROJECT_TOKEN) return false;
   return !import.meta.env.DEV || Boolean(import.meta.env.VITE_POSTHOG_DEV);
 }
 

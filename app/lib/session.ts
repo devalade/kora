@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { getCookie, setCookie, getRequestProtocol, getRequestUrl } from '@tanstack/react-start/server';
 import { and, db, eq, gt, inArray, isNull, lt } from 'void/db';
 import { sendEmail } from 'void/email';
+import { siteOrigin } from './site';
 import { apiTokens, passwordResets, sessions, users } from '@schema';
 import { newId } from './ids';
 import { avatarUrlFor } from './people';
@@ -178,10 +179,8 @@ export async function startSession(userId: string) {
 // and it expires after an hour. Emails always link to the production host in production, so a
 // forged Host header can never make a link point somewhere else.
 export const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
-const PRODUCTION_ORIGIN = 'https://kora.zecreator.com';
-
 export function appOrigin() {
-  return import.meta.env.DEV ? getRequestUrl().origin : PRODUCTION_ORIGIN;
+  return import.meta.env.DEV ? getRequestUrl().origin : siteOrigin();
 }
 
 export async function hashResetToken(token: string) {

@@ -116,16 +116,20 @@ function LandingPage() {
                 to="/login"
                 className="inline-flex h-12 items-center gap-2 rounded-full border border-ink/15 bg-paper px-6 text-sm font-semibold transition-colors duration-150 hover:border-ink/30 hover:bg-white"
               >
-                Open the demo
+                {DEMO_EMAIL ? 'Open the demo' : 'Sign in'}
               </Link>
             </div>
             <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-muted">
-              <span className="inline-flex items-center gap-1.5">
-                <Check size={13} className="text-mint-deep" /> Demo: {DEMO_EMAIL}
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <Check size={13} className="text-mint-deep" /> Password: {DEMO_PASSWORD}
-              </span>
+              {DEMO_EMAIL && (
+                <>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Check size={13} className="text-mint-deep" /> Demo: {DEMO_EMAIL}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Check size={13} className="text-mint-deep" /> Password: {DEMO_PASSWORD}
+                  </span>
+                </>
+              )}
               <span className="inline-flex items-center gap-1.5">
                 <Check size={13} className="text-mint-deep" /> No card
               </span>
@@ -289,10 +293,12 @@ function LandingPage() {
               <h2 className="mx-auto mt-3 max-w-2xl font-display text-[44px] leading-[0.98] tracking-[-0.02em] sm:text-[62px]">
                 Open a room. Invite the team. Go.
               </h2>
-              <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted">
-                The demo workspace is seeded with four teammates and a few days of conversation.
-                Poke at it before you make your own.
-              </p>
+              {DEMO_EMAIL && (
+                <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted">
+                  The demo workspace is seeded with four teammates and a few days of conversation.
+                  Poke at it before you make your own.
+                </p>
+              )}
               <div className="mt-7 flex flex-wrap justify-center gap-3">
                 <Link
                   to="/signup"
@@ -307,7 +313,7 @@ function LandingPage() {
                   to="/login"
                   className="inline-flex h-12 items-center gap-2 rounded-full border border-line px-6 text-sm font-semibold transition-colors duration-150 hover:border-ink/30 hover:bg-white"
                 >
-                  <Phone size={16} /> Try the demo
+                  <Phone size={16} /> {DEMO_EMAIL ? 'Try the demo' : 'Sign in'}
                 </Link>
               </div>
             </div>
