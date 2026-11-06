@@ -3,6 +3,8 @@ import { ArrowRight, Loader2, LockKeyhole, Mail, UserRound } from 'lucide-react'
 import { useState } from 'react';
 import { getSessionUserFn, signUpFn } from '../lib/auth';
 import { AuthLayout } from '../components/auth-layout';
+import { track } from '../lib/analytics';
+import { errorMessage } from '../lib/errors';
 
 function safeRedirect(value: unknown) {
   return typeof value === 'string' &&
@@ -11,19 +13,6 @@ function safeRedirect(value: unknown) {
     !value.includes('\\')
     ? value
     : undefined;
-}
-
-// Server errors arrive as plain messages (lockout, bad credentials) or, for failed validation, as
-// a JSON list of issues. Show the first readable message either way.
-function errorMessage(caught: unknown, fallback: string) {
-  if (!(caught instanceof Error)) return fallback;
-  try {
-    const issues: unknown = JSON.parse(caught.message);
-    if (Array.isArray(issues) && typeof issues[0]?.message === 'string') return issues[0].message;
-  } catch {
-    // Not JSON: the message is already readable.
-  }
-  return caught.message || fallback;
 }
 
 export const Route = createFileRoute('/signup')({
@@ -53,6 +42,7 @@ function SignupPage() {
     setError(null);
     try {
       await signUpFn({ data: { name, email, password } });
+      track('signed_up');
       await router.invalidate();
       if (search.redirect) window.location.assign(search.redirect);
       else await navigate({ to: '/app' });
@@ -149,7 +139,15 @@ function SignupPage() {
         </button>
       </form>
       <p className="mt-4 text-[11px] leading-5 text-faint">
-        By creating an account you agree to keep the room useful and the threads on topic.
+        By creating an account you agree to the{' '}
+        <Link to="/terms" className="underline decoration-line underline-offset-2 hover:text-ink">
+          Terms
+        </Link>{' '}
+        and the{' '}
+        <Link to="/privacy" className="underline decoration-line underline-offset-2 hover:text-ink">
+          Privacy Policy
+        </Link>
+        .
       </p>
     </AuthLayout>
   );

@@ -1,12 +1,16 @@
 import {
+  Bell,
+  BellOff,
   Camera,
   Check,
   Copy,
   Hash,
   Loader2,
   Lock,
+  LogOut,
   MessageSquare,
   Plus,
+  RefreshCw,
   Search,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -14,11 +18,15 @@ import { toast } from 'sonner';
 import {
   createChannelFn,
   joinChannelFn,
+  leaveChannelFn,
   openDmFn,
   searchMessagesFn,
+  setChannelMutedFn,
   updateChannelFn,
 } from '../lib/chat';
-import { signOutEverywhereFn, updateProfileFn } from '../lib/auth';
+import { changePasswordFn, signOutEverywhereFn, updateProfileFn } from '../lib/auth';
+import { resetInviteCodeFn } from '../lib/members';
+import { notificationsEnabled, setNotificationsEnabled } from '../lib/notifications';
 import type {
   ChannelSummary,
   SearchHit,
@@ -27,7 +35,7 @@ import type {
 } from '../lib/types';
 import { Avatar } from './avatar';
 import { Modal } from './modal';
-import { clockTime } from '../lib/format';
+import { clockTime, dayLabel } from '../lib/format';
 import { cn } from '../utils/cn';
 
 export function CreateChannelDialog({
@@ -292,7 +300,25 @@ export function InviteDialog({
   snapshot: WorkspaceSnapshot;
 }) {
   const [copied, setCopied] = useState(false);
-  const link = `${typeof window === 'undefined' ? '' : window.location.origin}/join/${snapshot.workspace.inviteCode}`;
+  const [code, setCode] = useState(snapshot.workspace.inviteCode);
+  const [resetting, setResetting] = useState(false);
+  const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
+  useEffect(() => setCode(snapshot.workspace.inviteCode), [snapshot.workspace.inviteCode]);
+  const link = `${typeof window === 'undefined' ? '' : window.location.origin}/join/${code}`;
+
+  async function resetLink() {
+    if (!window.confirm('Make a new invite link? The current link and code stop working at once.')) return;
+    setResetting(true);
+    try {
+      const result = await resetInviteCodeFn({ data: { workspaceId: snapshot.workspace.id } });
+      setCode(result.inviteCode);
+      toast.success('New invite link ready. The old one no longer works.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not reset the link.');
+    } finally {
+      setResetting(false);
+    }
+  }
 
   async function copy(value: string) {
     await navigator.clipboard.writeText(value);
@@ -322,8 +348,22 @@ export function InviteDialog({
         </div>
         <div className="rounded-xl border border-dashed border-line px-4 py-3">
           <p className="text-[11px] font-semibold tracking-wide text-faint uppercase">Invite code</p>
-          <p className="mt-1 font-mono text-lg tracking-[0.16em]">{snapshot.workspace.inviteCode}</p>
+          <p className="mt-1 font-mono text-lg tracking-[0.16em]">{code}</p>
         </div>
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            <p className="min-w-0 flex-1 text-xs text-muted">Shared the link somewhere it should not be? Make a new one.</p>
+            <button
+              type="button"
+              onClick={() => void resetLink()}
+              disabled={resetting}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line px-3 text-xs font-medium text-ink-soft hover:bg-line-soft disabled:opacity-50"
+            >
+              {resetting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              Reset link
+            </button>
+          </div>
+        )}
         <div>
           <p className="mb-2 text-xs font-semibold text-ink-soft">
             Already here · {snapshot.members.length}
@@ -416,7 +456,7 @@ export function SearchDialog({
   open: boolean;
   onClose: () => void;
   snapshot: WorkspaceSnapshot;
-  onOpenChannel: (channelId: string) => void;
+  onOpenChannel: (channelId: string, messageId?: string, threadId?: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -442,7 +482,9 @@ export function SearchDialog({
   }, [activeIndex]);
 
   function openHit(hit: SearchHit) {
-    onOpenChannel(hit.channelId);
+    // A reply opens its thread; a channel message is scrolled to and highlighted.
+    if (hit.message.parentId) onOpenChannel(hit.channelId, undefined, hit.message.parentId);
+    else onOpenChannel(hit.channelId, hit.message.id);
     onClose();
   }
 
@@ -543,8 +585,8 @@ export function SearchDialog({
               <span className="flex items-baseline gap-2">
                 <span className="text-[13px] font-semibold">{hit.message.author.name}</span>
                 <span className="text-[11px] text-faint">#{hit.channelName}</span>
-                <span className="ml-auto text-[11px] text-faint tabular-nums">
-                  {clockTime(hit.message.createdAt)}
+                <span className="ml-auto text-[11px] text-faint tabular-nums" suppressHydrationWarning>
+                  {dayLabel(hit.message.createdAt)} · {clockTime(hit.message.createdAt)}
                 </span>
               </span>
               <span className="mt-0.5 block truncate text-[13px] text-muted">{hit.message.body}</span>
@@ -698,6 +740,8 @@ export function ProfileDialog({
             </button>
           </div>
         )}
+        <NotificationSetting />
+        <PasswordSection email={me.email} />
         <div className="border-t border-line pt-4">
           <button
             type="button"
@@ -719,25 +763,42 @@ export function ChannelDetailsDialog({
   open,
   onClose,
   snapshot,
+  onChanged,
+  onLeft,
 }: {
   open: boolean;
   onClose: () => void;
   snapshot: WorkspaceSnapshot;
+  onChanged?: () => void;
+  /** After leaving, the page moves to another channel. */
+  onLeft?: () => void;
 }) {
-  const [topic, setTopic] = useState(snapshot.channel?.topic ?? '');
-  const [saving, setSaving] = useState(false);
   const channel = snapshot.channel;
+  const [name, setName] = useState(channel?.name ?? '');
+  const [topic, setTopic] = useState(channel?.topic ?? '');
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<'mute' | 'leave' | null>(null);
+  const isDm = channel?.kind === 'dm';
+  const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
+  const canRename = Boolean(channel && !isDm && (isAdmin || channel.createdBy === snapshot.me.id));
 
   useEffect(() => {
+    if (!open) return;
+    setName(channel?.name ?? '');
     setTopic(channel?.topic ?? '');
-  }, [channel?.topic]);
+    // Reset only when the dialog opens; the snapshot refreshes underneath it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, channel?.id]);
 
   async function save() {
     if (!channel) return;
     setSaving(true);
     try {
-      await updateChannelFn({ data: { channelId: channel.id, topic } });
-      toast.success('Channel topic updated.');
+      await updateChannelFn({
+        data: { channelId: channel.id, topic, ...(canRename && name.trim() !== channel.name ? { name } : {}) },
+      });
+      toast.success('Channel updated.');
+      onChanged?.();
       onClose();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not update the channel.');
@@ -746,47 +807,128 @@ export function ChannelDetailsDialog({
     }
   }
 
+  async function toggleMute() {
+    if (!channel) return;
+    setBusy('mute');
+    try {
+      await setChannelMutedFn({ data: { channelId: channel.id, muted: !channel.muted } });
+      toast.success(channel.muted ? 'Unmuted. You will see new messages again.' : 'Muted. Only mentions will reach you.');
+      onChanged?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not change the setting.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function leave() {
+    if (!channel) return;
+    const warning =
+      channel.kind === 'private'
+        ? `Leave #${channel.name}? It is private, so someone will need to add you back.`
+        : `Leave #${channel.name}? You can join again from Browse channels.`;
+    if (!window.confirm(warning)) return;
+    setBusy('leave');
+    try {
+      await leaveChannelFn({ data: { channelId: channel.id } });
+      toast.success(`You left #${channel.name}.`);
+      onClose();
+      onLeft?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not leave the channel.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const field = 'h-11 w-full rounded-xl border border-line bg-canvas px-3 text-sm outline-none focus:border-ink/30 disabled:text-muted';
+
   return (
-    <Modal open={open} onClose={onClose} title="Channel details">
+    <Modal open={open} onClose={onClose} title={isDm ? 'Conversation details' : 'Channel details'}>
       {channel && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 rounded-2xl bg-canvas p-4">
-            <span className="grid size-10 place-items-center rounded-xl bg-sage">
-              <Hash size={18} />
-            </span>
-            <div>
-              <p className="text-base font-semibold">#{channel.name}</p>
-              <p className="text-xs text-muted">
-                {channel.kind === 'private' ? 'Private channel' : 'Public channel'} ·{' '}
-                {channel.memberCount} members
-              </p>
-            </div>
-          </div>
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-ink-soft">Topic</span>
-            <input
-              value={topic}
-              onChange={(event) => setTopic(event.target.value)}
-              className="h-11 w-full rounded-xl border border-line bg-canvas px-3 text-sm outline-none focus:border-ink/30"
-            />
-          </label>
-          <div className="flex justify-end gap-2">
+          {!isDm && (
+            <>
+              <div className="flex items-center gap-3 rounded-2xl bg-canvas p-4">
+                <span className="grid size-10 place-items-center rounded-xl bg-sage">
+                  {channel.kind === 'private' ? <Lock size={17} /> : <Hash size={18} />}
+                </span>
+                <div>
+                  <p className="text-base font-semibold">#{channel.name}</p>
+                  <p className="text-xs text-muted">
+                    {channel.kind === 'private' ? 'Private channel' : 'Public channel'} · {channel.memberCount} members
+                  </p>
+                </div>
+              </div>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-ink-soft">Name</span>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  disabled={!canRename}
+                  aria-describedby="channel-name-hint"
+                  className={field}
+                />
+                <span id="channel-name-hint" className="mt-1 block text-[11px] text-faint">
+                  {canRename
+                    ? 'Lowercase letters, numbers and dashes. Links to this channel keep working.'
+                    : 'Only the person who created the channel or a workspace admin can rename it.'}
+                </span>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-ink-soft">Topic</span>
+                <input value={topic} onChange={(event) => setTopic(event.target.value)} className={field} />
+              </label>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="h-10 rounded-xl px-4 text-sm font-medium text-muted hover:bg-line-soft"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void save()}
+                  disabled={saving || (canRename && !name.trim())}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-paper disabled:opacity-40"
+                >
+                  {saving && <Loader2 size={14} className="animate-spin" />}
+                  Save
+                </button>
+              </div>
+            </>
+          )}
+          <div className={cn('space-y-1', !isDm && 'border-t border-line pt-4')}>
             <button
               type="button"
-              onClick={onClose}
-              className="h-10 rounded-xl px-4 text-sm font-medium text-muted hover:bg-line-soft"
+              onClick={() => void toggleMute()}
+              disabled={busy !== null}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-line-soft disabled:opacity-50"
             >
-              Cancel
+              {channel.muted ? <Bell size={16} className="text-muted" /> : <BellOff size={16} className="text-muted" />}
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{channel.muted ? 'Unmute' : 'Mute'}</span>
+                <span className="block text-xs text-muted">
+                  {channel.muted
+                    ? 'Muted: no unread badge or notifications, except when someone mentions you.'
+                    : 'Hide the unread badge and notifications. Mentions still reach you.'}
+                </span>
+              </span>
+              {busy === 'mute' && <Loader2 size={14} className="animate-spin" />}
             </button>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-paper disabled:opacity-40"
-            >
-              {saving && <Loader2 size={14} className="animate-spin" />}
-              Save topic
-            </button>
+            {!isDm && (
+              <button
+                type="button"
+                onClick={() => void leave()}
+                disabled={busy !== null}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-danger hover:bg-danger/5 disabled:opacity-50"
+              >
+                <LogOut size={16} />
+                <span className="flex-1 text-sm font-medium">Leave channel</span>
+                {busy === 'leave' && <Loader2 size={14} className="animate-spin" />}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -917,5 +1059,159 @@ function ProfilePhoto({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Browser notifications for DMs and mentions while Kora is open in a tab. */
+function NotificationSetting() {
+  const [state, setState] = useState<'unsupported' | 'denied' | 'on' | 'off'>('off');
+  useEffect(() => {
+    if (typeof Notification === 'undefined') setState('unsupported');
+    else if (Notification.permission === 'denied') setState('denied');
+    else setState(notificationsEnabled() ? 'on' : 'off');
+  }, []);
+
+  async function toggle() {
+    if (state === 'on') {
+      setNotificationsEnabled(false);
+      setState('off');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      setNotificationsEnabled(true);
+      setState('on');
+      new Notification('Notifications are on', { body: 'Kora will tell you about direct messages and mentions.', icon: '/favicon-32.png' });
+    } else {
+      setState(permission === 'denied' ? 'denied' : 'off');
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 border-t border-line pt-4">
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-ink">Desktop notifications</span>
+        <span className="block text-xs text-muted">
+          {state === 'unsupported'
+            ? 'This browser does not support notifications.'
+            : state === 'denied'
+              ? 'Blocked in your browser settings. Allow notifications for this site to turn them on.'
+              : 'Direct messages and mentions, while Kora is open in a tab.'}
+        </span>
+      </span>
+      {(state === 'on' || state === 'off') && (
+        <button
+          type="button"
+          onClick={() => void toggle()}
+          aria-pressed={state === 'on'}
+          className={cn(
+            'h-9 shrink-0 rounded-xl border px-3 text-sm font-medium',
+            state === 'on' ? 'border-mint-deep/30 bg-mint/40 text-mint-deep' : 'border-line text-ink-soft hover:bg-line-soft',
+          )}
+        >
+          {state === 'on' ? 'On' : 'Turn on'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PasswordSection({ email }: { email: string }) {
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await changePasswordFn({ data: { currentPassword: current, newPassword: next } });
+      toast.success('Password changed. Other devices were signed out.');
+      setOpen(false);
+      setCurrent('');
+      setNext('');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not change the password.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="flex items-center gap-3 border-t border-line pt-4">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-ink">Password</span>
+          <span className="block text-xs text-muted">Change the password you sign in with as {email}.</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="h-9 shrink-0 rounded-xl border border-line px-3 text-sm font-medium text-ink-soft hover:bg-line-soft"
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
+  const field = 'h-11 w-full rounded-xl border border-line bg-canvas px-3 text-sm outline-none focus:border-ink/30';
+  return (
+    <form onSubmit={(event) => void save(event)} className="space-y-3 border-t border-line pt-4">
+      <p className="text-sm font-medium text-ink">Change password</p>
+      {/* Lets password managers attach the new password to the right account. */}
+      <input type="email" autoComplete="username" value={email} readOnly hidden />
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-semibold text-ink-soft">Current password</span>
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(event) => setCurrent(event.target.value)}
+          className={field}
+          required
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-xs font-semibold text-ink-soft">New password</span>
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={next}
+          onChange={(event) => setNext(event.target.value)}
+          minLength={8}
+          className={field}
+          required
+        />
+        <span className="mt-1 block text-[11px] text-faint">At least 8 characters. Other devices are signed out.</span>
+      </label>
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setError(null);
+          }}
+          className="h-10 rounded-xl px-4 text-sm font-medium text-muted hover:bg-line-soft"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={saving || !current || next.length < 8}
+          className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-paper disabled:opacity-40"
+        >
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          Change password
+        </button>
+      </div>
+    </form>
   );
 }

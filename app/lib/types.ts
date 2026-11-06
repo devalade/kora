@@ -31,6 +31,11 @@ export type ChannelSummary = {
   memberCount: number;
   lastMessageAt: string | null;
   isMember: boolean;
+  /** The viewer muted it: no unread badge or notifications, only mentions. */
+  muted: boolean;
+  createdBy: string;
+  /** The viewer's read marker; null when they are not a member. */
+  lastReadAt: string | null;
 };
 
 export type DmSummary = ChannelSummary & {

@@ -72,12 +72,18 @@ export function AppRail({
 }: {
   workspaceSlug: string;
   active: RailArea;
-  me: Pick<UserSummary, 'name' | 'avatarColor'> & { avatarUrl?: string | null };
+  /** Missing on loading screens, where the session has not resolved yet: a blank circle shows. */
+  me?: Pick<UserSummary, 'name' | 'avatarColor'> & { avatarUrl?: string | null };
   onSignOut: () => void;
   onProfile?: () => void;
   layout?: 'column' | 'auto';
 }) {
   const unread = useInboxUnread(workspaceSlug);
+  const face = me ? (
+    <Avatar name={me.name} src={me.avatarUrl} color={me.avatarColor} size="md" online className="[--avatar-ring:#151b19]" />
+  ) : (
+    <span className="size-9 rounded-full bg-white/10" aria-hidden="true" />
+  );
   const params = { workspaceSlug };
   const auto = layout === 'auto';
 
@@ -205,13 +211,13 @@ export function AppRail({
             onClick={onProfile}
             className="grid size-10 place-items-center rounded-full transition hover:ring-2 hover:ring-white/15"
             aria-label="Your profile"
-            title={me.name}
+            title={me?.name}
           >
-            <Avatar name={me.name} src={me.avatarUrl} color={me.avatarColor} size="md" online className="[--avatar-ring:#151b19]" />
+            {face}
           </button>
         ) : (
-          <span className="grid size-10 place-items-center" title={me.name}>
-            <Avatar name={me.name} src={me.avatarUrl} color={me.avatarColor} size="md" online className="[--avatar-ring:#151b19]" />
+          <span className="grid size-10 place-items-center" title={me?.name}>
+            {face}
           </span>
         )}
         <button

@@ -1,0 +1,14 @@
+# The app itself needs an account; only the public pages are worth indexing.
+User-agent: *
+Allow: /$
+Allow: /login
+Allow: /signup
+Allow: /terms
+Allow: /privacy
+Disallow: /app
+Disallow: /api
+Disallow: /join
+Disallow: /reset-password
+Disallow: /forgot-password
+
+Sitemap: https://kora.zecreator.com/sitemap.xml

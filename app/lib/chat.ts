@@ -22,6 +22,7 @@ import {
   channels,
   messages,
   issues,
+  notifications,
   reactions,
   taskStatuses,
   teams,
@@ -35,8 +36,9 @@ import { issueIdsForKeys, issueKeysIn, issueSubscribers, notify, recordIssueEven
 import { newId, newInviteCode, slugify } from './ids';
 import { mentionHandle, mentionLookup } from './mentions';
 import { avatarUrlFor, toUserSummary } from './people';
-import { memberUsers, requireChannel, requireUser, requireWorkspace, touchPresence } from './server';
+import { isAdminRole, memberUsers, requireChannel, requireUser, requireWorkspace, touchPresence } from './server';
 import { publish, toChannel, toUser, toWorkspace } from './realtime';
+import { throttleWrite } from './rate-limit';
 import type {
   CallView,
   ChannelSummary,
@@ -120,6 +122,18 @@ function authorOf(row: MessageBase): UserSummary {
     online: Date.now() - new Date(row.authorLastSeenAt).getTime() < LIVE_WINDOW_MS,
     lastSeenAt: row.authorLastSeenAt,
   };
+}
+
+/**
+ * Live messages, plus deleted ones that still have live replies (shown as "This message was deleted.").
+ * A function, not a module-level value: the TanStack Start compiler follows module-level calls to
+ * imported functions and fails to look up `void/db` in dev.
+ */
+function visibleRoot() {
+  return or(
+    isNull(messages.deletedAt),
+    sql`exists (select 1 from ${messages} as live_reply where live_reply.parent_id = ${messages.id} and live_reply.deleted_at is null)`,
+  );
 }
 
 const HYDRATE_CHUNK = 90;
@@ -387,7 +401,10 @@ async function channelSummaries(workspaceId: string, viewerId: string, viewerHan
         name: channels.name,
         topic: channels.topic,
         kind: channels.kind,
+        createdBy: channels.createdBy,
         mineChannelId: channelMembers.channelId,
+        mutedAt: channelMembers.mutedAt,
+        lastReadAt: channelMembers.lastReadAt,
         lastMessageAt: sql<string | null>`(select max(${messages.createdAt}) from ${messages} where ${messages.channelId} = ${channels.id} and ${messages.deletedAt} is null)`,
       })
       .from(channels)
@@ -442,6 +459,9 @@ async function channelSummaries(workspaceId: string, viewerId: string, viewerHan
     memberCount: memberCount.get(channel.id) ?? 0,
     lastMessageAt: channel.lastMessageAt ?? null,
     isMember: channel.mineChannelId !== null,
+    muted: channel.mutedAt !== null,
+    createdBy: channel.createdBy,
+    lastReadAt: channel.lastReadAt ?? null,
   }));
   return { summaries, allMembers };
 }
@@ -476,6 +496,7 @@ export const createWorkspaceFn = createServerFn({ method: 'POST' })
   .validator(z.object({ name: z.string().trim().min(2, 'Name your workspace').max(60) }))
   .handler(async ({ data }) => {
     const me = await requireUser();
+    await throttleWrite('workspace', me.id);
     const base = slugify(data.name);
     let slug = base;
     for (let attempt = 1; attempt < 12; attempt++) {
@@ -562,7 +583,8 @@ export const createChannelFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const me = await requireUser();
     await requireWorkspace(data.workspaceId, me.id);
-    const name = data.name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    await throttleWrite('channel', me.id);
+    const name = channelSlug(data.name);
     if (!name) throw new Error('Use letters or numbers in the channel name.');
     const existing = await db
       .select({ id: channels.id })
@@ -773,7 +795,7 @@ export const workspaceSnapshotFn = createServerFn({ method: 'GET' })
             and(
               eq(messages.channelId, selected.id),
               isNull(messages.parentId),
-              isNull(messages.deletedAt),
+              visibleRoot(),
             ),
           )
           .orderBy(desc(messages.createdAt))
@@ -833,7 +855,7 @@ export const getChannelPageFn = createServerFn({ method: 'GET' })
         and(
           eq(messages.channelId, data.channelId),
           isNull(messages.parentId),
-          isNull(messages.deletedAt),
+          visibleRoot(),
           lt(messages.createdAt, data.before),
         ),
       )
@@ -854,7 +876,7 @@ export const getThreadFn = createServerFn({ method: 'GET' })
       .select(messageSelection)
       .from(messages)
       .innerJoin(users, eq(users.id, messages.userId))
-      .where(and(eq(messages.id, data.messageId), isNull(messages.deletedAt)));
+      .where(and(eq(messages.id, data.messageId), visibleRoot()));
     if (!parent) throw new Error('Message not found.');
     await requireChannel(parent.channelId, me.id);
     const [replies, typingRows] = await Promise.all([
@@ -975,6 +997,7 @@ export const sendMessageFn = createServerFn({ method: 'POST' })
     const channel = await requireChannel(data.channelId, me.id);
     const body = data.body.trim();
     if (!body && data.attachmentIds.length === 0) throw new Error('Write something first.');
+    await throttleWrite('message', me.id);
     let parentAuthorId: string | null = null;
     if (data.parentId) {
       const [parent] = await db
@@ -1161,12 +1184,148 @@ export const searchMessagesFn = createServerFn({ method: 'GET' })
     return hits;
   });
 
+/** Lowercase letters, numbers and dashes, like Slack. Empty when nothing usable is left. */
+function channelSlug(name: string) {
+  return name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
+}
+
+/**
+ * Topic: any member. Name: the channel's creator or a workspace admin, since a rename changes the
+ * room for everyone. DMs have neither.
+ */
 export const updateChannelFn = createServerFn({ method: 'POST' })
-  .validator(z.object({ channelId: z.string(), topic: z.string().trim().max(160) }))
+  .validator(
+    z.object({
+      channelId: z.string(),
+      topic: z.string().trim().max(160).optional(),
+      name: z.string().trim().min(1, 'Name the channel').max(50).optional(),
+    }),
+  )
   .handler(async ({ data }) => {
     const me = await requireUser();
     const channel = await requireChannel(data.channelId, me.id);
-    await db.update(channels).set({ topic: data.topic }).where(eq(channels.id, data.channelId));
-    await publish(channel.workspaceId, [toChannel(data.channelId, { t: 'chat', c: data.channelId })]);
+    if (channel.kind === 'dm' || channel.kind === 'studio') throw new Error('This conversation cannot be renamed.');
+    const patch: { topic?: string; name?: string } = {};
+    if (data.topic !== undefined) patch.topic = data.topic;
+    if (data.name !== undefined) {
+      const name = channelSlug(data.name);
+      if (!name) throw new Error('Use letters or numbers in the channel name.');
+      if (name !== channel.name) {
+        const [row] = await db.select({ createdBy: channels.createdBy }).from(channels).where(eq(channels.id, channel.channelId));
+        const membership = await requireWorkspace(channel.workspaceId, me.id);
+        if (row?.createdBy !== me.id && !isAdminRole(membership.role)) {
+          throw new Error('Only the person who created the channel or a workspace admin can rename it.');
+        }
+        const [taken] = await db
+          .select({ id: channels.id })
+          .from(channels)
+          .where(and(eq(channels.workspaceId, channel.workspaceId), eq(channels.name, name), ne(channels.kind, 'dm')));
+        if (taken) throw new Error(`#${name} already exists.`);
+        patch.name = name;
+      }
+    }
+    if (Object.keys(patch).length === 0) return { ok: true as const, name: channel.name };
+    await db.update(channels).set(patch).where(eq(channels.id, data.channelId));
+    await publish(channel.workspaceId, [
+      toChannel(data.channelId, { t: 'chat', c: data.channelId }),
+      ...(patch.name ? [toWorkspace({ t: 'workspace' })] : []),
+    ]);
+    return { ok: true as const, name: patch.name ?? channel.name };
+  });
+
+/** Leaving a public channel can be undone by joining again; a private one needs a new invite. */
+export const leaveChannelFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ channelId: z.string() }))
+  .handler(async ({ data }) => {
+    const me = await requireUser();
+    const channel = await requireChannel(data.channelId, me.id);
+    if (channel.kind === 'dm' || channel.kind === 'studio') throw new Error('You cannot leave this conversation.');
+    await db
+      .delete(channelMembers)
+      .where(and(eq(channelMembers.channelId, data.channelId), eq(channelMembers.userId, me.id)));
+    await publish(channel.workspaceId, [
+      toUser(me.id, { t: 'grants' }),
+      toChannel(data.channelId, { t: 'chat', c: data.channelId }),
+    ]);
+    return { ok: true as const };
+  });
+
+export const setChannelMutedFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ channelId: z.string(), muted: z.boolean() }))
+  .handler(async ({ data }) => {
+    const me = await requireUser();
+    const channel = await requireChannel(data.channelId, me.id);
+    await db
+      .update(channelMembers)
+      .set({ mutedAt: data.muted ? new Date().toISOString() : null })
+      .where(and(eq(channelMembers.channelId, data.channelId), eq(channelMembers.userId, me.id)));
+    // Only this person's sidebar changes.
+    await publish(channel.workspaceId, [toUser(me.id, { t: 'read' })]);
+    return { ok: true as const };
+  });
+
+/** The author edits their own message. Edits do not notify anyone again. */
+export const editMessageFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ messageId: z.string(), body: z.string().max(8000) }))
+  .handler(async ({ data }) => {
+    const me = await requireUser();
+    const [message] = await db
+      .select({ channelId: messages.channelId, parentId: messages.parentId, userId: messages.userId, body: messages.body })
+      .from(messages)
+      .where(and(eq(messages.id, data.messageId), isNull(messages.deletedAt)));
+    if (!message) throw new Error('Message not found.');
+    const channel = await requireChannel(message.channelId, me.id);
+    if (message.userId !== me.id) throw new Error('You can only edit your own messages.');
+    const body = data.body.trim();
+    if (body === message.body) return { ok: true as const };
+    if (!body) {
+      const [file] = await db.select({ id: attachments.id }).from(attachments).where(eq(attachments.messageId, data.messageId)).limit(1);
+      if (!file) throw new Error('A message needs text or a file. Delete it instead.');
+    }
+    await throttleWrite('message', me.id);
+    await db
+      .update(messages)
+      .set({ body, editedAt: new Date().toISOString() })
+      .where(eq(messages.id, data.messageId));
+    await publish(channel.workspaceId, [
+      toChannel(message.channelId, { t: 'chat', c: message.channelId, m: message.parentId ?? data.messageId }),
+    ]);
+    return { ok: true as const };
+  });
+
+/**
+ * Soft delete by the author or a workspace admin. The text and files go at once; a message with
+ * replies stays as "This message was deleted." so its thread still has a parent. Inbox items that
+ * quote it are removed.
+ */
+export const deleteMessageFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ messageId: z.string() }))
+  .handler(async ({ data }) => {
+    const me = await requireUser();
+    const [message] = await db
+      .select({ channelId: messages.channelId, parentId: messages.parentId, userId: messages.userId })
+      .from(messages)
+      .where(and(eq(messages.id, data.messageId), isNull(messages.deletedAt)));
+    if (!message) throw new Error('Message not found.');
+    const channel = await requireChannel(message.channelId, me.id);
+    if (message.userId !== me.id) {
+      const membership = await requireWorkspace(channel.workspaceId, me.id);
+      if (!isAdminRole(membership.role)) throw new Error('You can only delete your own messages.');
+    }
+    await db
+      .update(messages)
+      .set({ body: '', deletedAt: new Date().toISOString() })
+      .where(eq(messages.id, data.messageId));
+    // Detached files are removed with the uploader's other abandoned uploads (api/upload.ts).
+    await db.update(attachments).set({ messageId: null }).where(eq(attachments.messageId, data.messageId));
+    await db.delete(reactions).where(eq(reactions.messageId, data.messageId));
+    const quoted = await db
+      .delete(notifications)
+      .where(eq(notifications.messageId, data.messageId))
+      .returning({ userId: notifications.userId });
+    await publish(channel.workspaceId, [
+      toChannel(message.channelId, { t: 'chat', c: message.channelId, m: message.parentId ?? data.messageId }),
+      ...[...new Set(quoted.map((row) => row.userId))].map((userId) => toUser(userId, { t: 'inbox' })),
+    ]);
     return { ok: true as const };
   });

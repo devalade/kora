@@ -1,7 +1,13 @@
-import { Loader2 } from 'lucide-react';
+import { Loader2, UserMinus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { getMembersFn, setMemberRoleFn, type MemberWithRole, type WorkspaceRole } from '../lib/members';
+import {
+  getMembersFn,
+  removeMemberFn,
+  setMemberRoleFn,
+  type MemberWithRole,
+  type WorkspaceRole,
+} from '../lib/members';
 import { Avatar } from './avatar';
 import { Modal } from './modal';
 
@@ -15,10 +21,12 @@ export function MembersDialog({
   open,
   onClose,
   workspaceId,
+  meId,
 }: {
   open: boolean;
   onClose: () => void;
   workspaceId: string;
+  meId?: string;
 }) {
   const [members, setMembers] = useState<MemberWithRole[] | null>(null);
   const [myRole, setMyRole] = useState<WorkspaceRole>('member');
@@ -53,6 +61,32 @@ export function MembersDialog({
       toast.success(`${member.name} is now ${role === 'admin' ? 'an admin' : 'a member'}.`);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : 'Could not change the role.');
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  /** The owner removes anyone else; admins remove members. */
+  function canRemove(member: MemberWithRole) {
+    if (member.id === meId || member.role === 'owner') return false;
+    if (myRole === 'owner') return true;
+    return myRole === 'admin' && member.role === 'member';
+  }
+
+  async function remove(member: MemberWithRole) {
+    if (
+      !window.confirm(
+        `Remove ${member.name} from the workspace? They lose access to every channel and DM here at once. Their messages and issues stay.`,
+      )
+    )
+      return;
+    setSaving(member.id);
+    try {
+      await removeMemberFn({ data: { workspaceId, userId: member.id } });
+      setMembers((current) => current?.filter((item) => item.id !== member.id) ?? null);
+      toast.success(`${member.name} was removed.`);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'Could not remove them.');
     } finally {
       setSaving(null);
     }
@@ -96,6 +130,18 @@ export function MembersDialog({
                 </span>
               ) : (
                 <span className="text-[12px] font-medium text-muted">{ROLE_COPY[member.role]}</span>
+              )}
+              {canRemove(member) && (
+                <button
+                  type="button"
+                  onClick={() => void remove(member)}
+                  disabled={saving !== null}
+                  aria-label={`Remove ${member.name}`}
+                  title="Remove from workspace"
+                  className="grid size-8 shrink-0 place-items-center rounded-md text-muted hover:bg-danger/5 hover:text-danger disabled:opacity-50"
+                >
+                  <UserMinus size={15} />
+                </button>
               )}
             </li>
           ))}

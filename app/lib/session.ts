@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { getCookie, setCookie, getRequestProtocol } from '@tanstack/react-start/server';
-import { and, db, eq, gt, inArray, lt } from 'void/db';
-import { apiTokens, sessions, users } from '@schema';
+import { getCookie, setCookie, getRequestProtocol, getRequestUrl } from '@tanstack/react-start/server';
+import { and, db, eq, gt, inArray, isNull, lt } from 'void/db';
+import { sendEmail } from 'void/email';
+import { apiTokens, passwordResets, sessions, users } from '@schema';
 import { newId } from './ids';
 import { avatarUrlFor } from './people';
 import type { UserSummary } from './types';
@@ -171,4 +172,73 @@ export async function startSession(userId: string) {
   await db.insert(sessions).values({ id, userId, expiresAt });
   writeSessionCookie(id);
   await purgeExpiredSessions().catch(() => undefined);
+}
+
+// Password reset links. The emailed token is random; only its SHA-256 is stored, it works once,
+// and it expires after an hour. Emails always link to the production host in production, so a
+// forged Host header can never make a link point somewhere else.
+export const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const PRODUCTION_ORIGIN = 'https://kora.zecreator.com';
+
+export function appOrigin() {
+  return import.meta.env.DEV ? getRequestUrl().origin : PRODUCTION_ORIGIN;
+}
+
+export async function hashResetToken(token: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Creates a reset link for the person and emails it. Older unused links stop working. */
+export async function sendPasswordReset(user: { id: string; email: string; name: string }) {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  await db.delete(passwordResets).where(eq(passwordResets.userId, user.id));
+  await db.insert(passwordResets).values({
+    tokenHash: await hashResetToken(token),
+    userId: user.id,
+    expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString(),
+  });
+  const link = `${appOrigin()}/reset-password?token=${token}`;
+  const firstName = user.name.split(/\s+/)[0] || 'there';
+  const result = await sendEmail({
+    to: user.email,
+    subject: 'Reset your Kora password',
+    text: [
+      `Hi ${firstName},`,
+      '',
+      'Someone asked to reset the password for your Kora account. Open this link to choose a new one:',
+      '',
+      link,
+      '',
+      'The link works once and expires in one hour. If you did not ask for this, you can ignore this email; your password stays the same.',
+    ].join('\n'),
+    html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5;color:#171a1a">
+<p>Hi ${escapeHtml(firstName)},</p>
+<p>Someone asked to reset the password for your Kora account. Choose a new one here:</p>
+<p><a href="${link}" style="display:inline-block;background:#ef5f3e;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Reset password</a></p>
+<p style="color:#736f66;font-size:13px">The link works once and expires in one hour. If you did not ask for this, you can ignore this email; your password stays the same.</p>
+</div>`,
+  });
+  if (!result.ok) console.error('Password reset email failed', 'error' in result ? result.error.code : 'delivery');
+}
+
+function escapeHtml(text: string) {
+  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
+/** The person a valid, unused, unexpired reset token belongs to, or null. */
+export async function userForResetToken(token: string) {
+  if (!token || token.length > 100) return null;
+  const [row] = await db
+    .select({ userId: passwordResets.userId })
+    .from(passwordResets)
+    .where(
+      and(
+        eq(passwordResets.tokenHash, await hashResetToken(token)),
+        isNull(passwordResets.usedAt),
+        gt(passwordResets.expiresAt, new Date().toISOString()),
+      ),
+    );
+  return row?.userId ?? null;
 }

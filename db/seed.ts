@@ -37,9 +37,9 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       statusText: 'Accra',
     },
     {
-      id: 'u-zane',
-      email: 'zane@kora.app',
-      name: 'Zane Miller',
+      id: 'u-elon',
+      email: 'elon@kora.app',
+      name: 'Elon Miller',
       avatarColor: '#B07AA1',
       title: 'Growth',
       statusEmoji: '📈',
@@ -159,7 +159,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     {
       id: 'm-4',
       channelId: 'ch-general',
-      userId: 'u-zane',
+      userId: 'u-elon',
       body: 'The launch page is up. Analytics says 42 signups overnight 🎉',
       minutes: 101,
     },
@@ -232,7 +232,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     {
       id: 'm-14',
       channelId: 'ch-random',
-      userId: 'u-zane',
+      userId: 'u-elon',
       body: 'Found a coffee place that roasts on site. Field trip.',
       minutes: 44,
     },
@@ -287,7 +287,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
   await db.insert(schema.reactions).values([
     { messageId: 'm-1', userId: 'u-alade', emoji: '👋' },
     { messageId: 'm-1', userId: 'u-kwame', emoji: '👋' },
-    { messageId: 'm-1', userId: 'u-zane', emoji: '👋' },
+    { messageId: 'm-1', userId: 'u-elon', emoji: '👋' },
     { messageId: 'm-4', userId: 'u-alade', emoji: '🎉' },
     { messageId: 'm-4', userId: 'u-amina', emoji: '🎉' },
     { messageId: 'm-4', userId: 'u-kwame', emoji: '🎉' },
@@ -322,13 +322,13 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       zone: 'huddle',
       x: 74,
       y: 22,
-      activity: 'Huddle with Zane',
+      activity: 'Huddle with Elon',
       status: 'huddle',
       updatedAt: at(7),
     },
     {
       workspaceId: 'ws-kora',
-      userId: 'u-zane',
+      userId: 'u-elon',
       zone: 'lounge',
       x: 18,
       y: 78,
@@ -366,7 +366,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     {
       id: 'oa-4',
       workspaceId: 'ws-kora',
-      userId: 'u-zane',
+      userId: 'u-elon',
       kind: 'moved',
       detail: 'Moved to the Lounge',
       createdAt: at(8),
@@ -457,7 +457,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     {
       id: 'i-9', teamId: 'p-kora', number: 9, title: 'Project covers from Grok',
       description: 'Use the Grok-generated isometric board as the empty-state cover.',
-      status: 'todo', priority: 4, assigneeId: 'u-zane', createdAt: at(45), updatedAt: at(22),
+      status: 'todo', priority: 4, assigneeId: 'u-elon', createdAt: at(45), updatedAt: at(22),
     },
     {
       id: 'i-10', teamId: 'p-kora', number: 10, title: 'Keyboard shortcuts j/k and c',
@@ -477,7 +477,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     {
       id: 'i-13', teamId: 'p-launch', number: 1, title: 'Write the launch post',
       description: 'A short launch post with the Studio screenshot and the task app.',
-      status: 'in_review', priority: 2, assigneeId: 'u-zane', createdAt: at(25), updatedAt: at(2),
+      status: 'in_review', priority: 2, assigneeId: 'u-elon', createdAt: at(25), updatedAt: at(2),
     },
     {
       id: 'i-14', teamId: 'p-launch', number: 2, title: 'Landing page copy pass',
@@ -547,7 +547,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     {
       id: 'pr-launch', workspaceId: 'ws-kora', name: 'Public launch', color: '#17795F',
       description: 'Launch post, landing page and the first hundred teams.',
-      status: 'planned', leadId: 'u-zane', startDate: day(2), targetDate: day(21),
+      status: 'planned', leadId: 'u-elon', startDate: day(2), targetDate: day(21),
       createdBy: 'u-alade', createdAt: at(60 * 24 * 5),
     },
   ]);
@@ -583,7 +583,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
     { id: 'e-2', issueId: 'i-4', actorId: 'u-amina', kind: 'labels', fromValue: null, toValue: 'Frontend', createdAt: at(50) },
     { id: 'e-3', issueId: 'i-2', actorId: 'u-amina', kind: 'assignee', fromValue: null, toValue: 'Amina Diallo', createdAt: at(41) },
     { id: 'e-4', issueId: 'i-2', actorId: 'u-amina', kind: 'status', fromValue: 'Todo', toValue: 'In Progress', createdAt: at(40) },
-    { id: 'e-5', issueId: 'i-13', actorId: 'u-zane', kind: 'priority', fromValue: 'Medium', toValue: 'High', createdAt: at(26) },
+    { id: 'e-5', issueId: 'i-13', actorId: 'u-elon', kind: 'priority', fromValue: 'Medium', toValue: 'High', createdAt: at(26) },
     { id: 'e-6', issueId: 'i-1', actorId: 'u-alade', kind: 'status', fromValue: 'In Review', toValue: 'Done', createdAt: at(8) },
   ]);
 
@@ -630,7 +630,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       createdAt: at(38),
     },
     {
-      id: 'c-4', issueId: 'i-8', userId: 'u-zane',
+      id: 'c-4', issueId: 'i-8', userId: 'u-elon',
       body: 'Start with read-only repo access and a branch, not direct pushes.',
       createdAt: at(30),
     },
@@ -649,7 +649,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
       createdAt: at(38),
     },
     {
-      id: 'n-3', workspaceId: 'ws-kora', userId: 'u-alade', actorId: 'u-zane', kind: 'issue_assigned',
+      id: 'n-3', workspaceId: 'ws-kora', userId: 'u-alade', actorId: 'u-elon', kind: 'issue_assigned',
       issueId: 'i-10', body: 'Keyboard shortcuts j/k and c', createdAt: at(22), readAt: at(20),
     },
   ]);

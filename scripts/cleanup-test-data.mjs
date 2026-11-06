@@ -25,7 +25,7 @@ if (!file) {
   process.exit(1);
 }
 
-const TEST_EMAILS = ['first-run-%', 'stranger-%', 'dbg-%', 'auth-security-%', 'throwaway-%'];
+const TEST_EMAILS = ['first-run-%', 'stranger-%', 'dbg-%', 'auth-security-%', 'throwaway-%', 'launch-%'];
 const TEST_TITLES = [
   'Owner issue %', 'Member issue %', 'Smoke test issue', 'Smoke test child', 'History issue %',
   'First issue in a new workspace', 'Second issue', 'Cap filler %', 'Cap needle %', 'Realtime issue %', 'Date picker check %',

@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import {
+  BellOff,
   ChevronDown,
   ShieldCheck,
   Hash,
@@ -7,6 +8,7 @@ import {
   Plus,
   Search,
   Settings2,
+  SlidersHorizontal,
   Users,
   X,
 } from 'lucide-react';
@@ -16,6 +18,7 @@ import { Avatar } from './avatar';
 import { AppRail } from './app-rail';
 import { cn } from '../utils/cn';
 import { MembersDialog } from './members-dialog';
+import { WorkspaceSettingsDialog } from './workspace-settings-dialog';
 import { useChannelTyping } from '../lib/realtime-client';
 
 export function WorkspaceSidebar({
@@ -45,6 +48,7 @@ export function WorkspaceSidebar({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const typing = useChannelTyping(snapshot.workspace.slug, snapshot.me.id);
   const typingNames = (channelId: string) => {
     const ids = typing.get(channelId) ?? [];
@@ -139,6 +143,14 @@ export function WorkspaceSidebar({
                     setMembersOpen(true);
                   }}
                 />
+                <MenuItem
+                  icon={<SlidersHorizontal size={15} />}
+                  label="Workspace settings"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setSettingsOpen(true);
+                  }}
+                />
                 <div className="my-1 h-px bg-sidebar-line" />
                 <Link
                   to="/app"
@@ -192,9 +204,11 @@ export function WorkspaceSidebar({
                     'group relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100',
                     channel.id === activeChannelId
                       ? 'bg-white/12 text-white'
-                      : channel.unread > 0 || channel.mentions > 0
+                      : channel.mentions > 0 || (channel.unread > 0 && !channel.muted)
                         ? 'font-semibold text-white hover:bg-white/8'
-                        : 'text-sidebar-text hover:bg-white/8 hover:text-white',
+                        : channel.muted
+                          ? 'text-sidebar-text/60 hover:bg-white/8 hover:text-white'
+                          : 'text-sidebar-text hover:bg-white/8 hover:text-white',
                   )}
                 >
                   {channel.id === activeChannelId && (
@@ -213,11 +227,12 @@ export function WorkspaceSidebar({
                       @
                     </span>
                   )}
-                  {channel.unread > 0 && channel.id !== activeChannelId && (
+                  {channel.unread > 0 && !channel.muted && channel.id !== activeChannelId && (
                     <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-coral px-1 text-[10px] font-bold text-white tabular-nums">
                       {channel.unread > 99 ? '99+' : channel.unread}
                     </span>
                   )}
+                  {channel.muted && <BellOff size={12} className="shrink-0 opacity-60" aria-label="Muted" />}
                   {channel.kind === 'private' && (
                     <span className="text-[9px] text-sidebar-text opacity-70">private</span>
                   )}
@@ -249,9 +264,11 @@ export function WorkspaceSidebar({
                     'group relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100',
                     dm.id === activeChannelId
                       ? 'bg-white/12 text-white'
-                      : dm.unread > 0 || dm.mentions > 0
+                      : dm.mentions > 0 || (dm.unread > 0 && !dm.muted)
                         ? 'font-semibold text-white hover:bg-white/8'
-                        : 'text-sidebar-text hover:bg-white/8 hover:text-white',
+                        : dm.muted
+                          ? 'text-sidebar-text/60 hover:bg-white/8 hover:text-white'
+                          : 'text-sidebar-text hover:bg-white/8 hover:text-white',
                   )}
                 >
                   {dm.id === activeChannelId && (
@@ -281,11 +298,12 @@ export function WorkspaceSidebar({
                       @
                     </span>
                   )}
-                  {dm.unread > 0 && dm.id !== activeChannelId && (
+                  {dm.unread > 0 && !dm.muted && dm.id !== activeChannelId && (
                     <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-coral px-1 text-[10px] font-bold text-white tabular-nums">
                       {dm.unread}
                     </span>
                   )}
+                  {dm.muted && <BellOff size={12} className="shrink-0 opacity-60" aria-label="Muted" />}
                 </Link>
               ))}
               {snapshot.dms.length === 0 && (
@@ -333,6 +351,12 @@ export function WorkspaceSidebar({
         open={membersOpen}
         onClose={() => setMembersOpen(false)}
         workspaceId={snapshot.workspace.id}
+        meId={snapshot.me.id}
+      />
+      <WorkspaceSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        workspace={snapshot.workspace}
       />
     </>
   );

@@ -1,4 +1,5 @@
-import { CornerUpLeft, Download, FileText, MessageSquareText, SmilePlus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CornerUpLeft, Download, FileText, Link2, MessageSquareText, MoreHorizontal, Pencil, SmilePlus, Trash2 } from 'lucide-react';
 import type { MessageView, UserSummary } from '../lib/types';
 import { Avatar } from './avatar';
 import { clockTime, dayLabel, fileSize, fullDate, plural, relativeTime } from '../lib/format';
@@ -7,6 +8,17 @@ import { IssueEmbeds } from './issue-embed';
 import { MessageLinkPreviews } from './link-preview';
 import { cn } from '../utils/cn';
 import { useDisplayTimeZone } from '../lib/use-display-time-zone';
+import { EmojiPopover } from './emoji-picker';
+import { FloatingMenu } from './floating';
+
+/** What a message row can do besides reacting and replying. Missing handlers hide the action. */
+export type MessageActions = {
+  onEdit?: (message: MessageView, body: string) => Promise<void>;
+  onDelete?: (message: MessageView) => void;
+  onCopyLink?: (message: MessageView) => void;
+  /** Workspace admins may delete anyone's message. */
+  canModerate?: boolean;
+};
 
 const QUICK_REACTIONS = ['👍', '🎉', '❤️'];
 
@@ -27,6 +39,9 @@ export function MessageList({
   onOpenThread,
   onImageOpen,
   onMentionClick,
+  actions,
+  unreadAfter,
+  highlightId,
 }: {
   messages: MessageView[];
   meId: string;
@@ -44,8 +59,16 @@ export function MessageList({
   onOpenThread: (message: MessageView) => void;
   onImageOpen: (url: string, name: string) => void;
   onMentionClick?: (userId: string) => void;
+  actions?: MessageActions;
+  /** The viewer's read marker when the channel opened: a "New" line goes above the first later message. */
+  unreadAfter?: string | null;
+  /** A linked message, scrolled to and tinted. */
+  highlightId?: string | null;
 }) {
   const timeZone = useDisplayTimeZone();
+  const firstUnreadId = unreadAfter
+    ? messages.find((message) => message.createdAt > unreadAfter && message.author.id !== meId)?.id
+    : undefined;
   return (
     <div className="pb-2">
       {hasMore && (
@@ -91,7 +114,8 @@ export function MessageList({
               previous &&
               new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() <
                 5 * 60_000;
-            const grouped = Boolean(previous && sameAuthor && closeInTime && !newDay);
+            const isFirstUnread = message.id === firstUnreadId;
+            const grouped = Boolean(previous && sameAuthor && closeInTime && !newDay && !isFirstUnread);
             return (
               <div key={message.id}>
                 {newDay && (
@@ -101,6 +125,12 @@ export function MessageList({
                       {dayLabel(message.createdAt, timeZone)}
                     </span>
                     <span className="h-px flex-1 bg-line" />
+                  </div>
+                )}
+                {isFirstUnread && (
+                  <div className="flex items-center gap-2 py-1" role="separator" aria-label="New messages">
+                    <span className="h-px flex-1 bg-coral/50" />
+                    <span className="text-[11px] font-semibold text-coral-deep">New</span>
                   </div>
                 )}
                 <MessageRow
@@ -115,6 +145,8 @@ export function MessageList({
                   onOpenThread={onOpenThread}
                   onImageOpen={onImageOpen}
                   onMentionClick={onMentionClick}
+                  actions={actions}
+                  highlighted={message.id === highlightId}
                 />
               </div>
             );
@@ -139,6 +171,8 @@ function MessageRow({
   onOpenThread,
   onImageOpen,
   onMentionClick,
+  actions,
+  highlighted,
 }: {
   message: MessageView;
   grouped: boolean;
@@ -151,13 +185,28 @@ function MessageRow({
   onOpenThread: (message: MessageView) => void;
   onImageOpen: (url: string, name: string) => void;
   onMentionClick?: (userId: string) => void;
+  actions?: MessageActions;
+  highlighted?: boolean;
 }) {
   const timeZone = useDisplayTimeZone();
+  const [editing, setEditing] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pickerAnchor = useRef<HTMLButtonElement>(null);
+  const menuAnchor = useRef<HTMLButtonElement>(null);
+  const deleted = Boolean(message.deletedAt);
+  const canEdit = Boolean(actions?.onEdit && isMine && !deleted);
+  const canDelete = Boolean(actions?.onDelete && (isMine || actions.canModerate) && !deleted);
+  const hasMenu = !deleted && Boolean(canEdit || canDelete || actions?.onCopyLink);
   return (
     <div
+      id={`message-${message.id}`}
+      data-message-id={message.id}
       className={cn(
         'message-row group relative -mx-2 rounded-xl px-2 transition-colors duration-100 hover:bg-ink/[0.025]',
         grouped ? 'py-0.5' : 'pt-3 pb-1',
+        highlighted && 'bg-coral-soft/60 hover:bg-coral-soft/60',
+        (pickerOpen || menuOpen) && 'is-active',
       )}
     >
       <div className="flex gap-3">
@@ -193,20 +242,37 @@ function MessageRow({
             </div>
           )}
 
-          <div className="text-[14.5px] leading-6 text-ink-soft">
-            <RichText
-              body={message.body}
-              channelNames={channelNames}
-              issues={message.issues}
-              members={members}
-              meId={meId}
-              onMentionClick={onMentionClick}
+          {deleted ? (
+            <p className="text-[14px] leading-6 text-faint italic">This message was deleted.</p>
+          ) : editing && actions?.onEdit ? (
+            <EditBox
+              initial={message.body}
+              onCancel={() => setEditing(false)}
+              onSave={async (body) => {
+                await actions.onEdit!(message, body);
+                setEditing(false);
+              }}
             />
-            {message.editedAt && <span className="ml-1 text-[11px] text-faint">(edited)</span>}
-          </div>
+          ) : (
+            <div className="text-[14.5px] leading-6 text-ink-soft">
+              <RichText
+                body={message.body}
+                channelNames={channelNames}
+                issues={message.issues}
+                members={members}
+                meId={meId}
+                onMentionClick={onMentionClick}
+              />
+              {message.editedAt && (
+                <span className="ml-1 text-[11px] text-faint" title={fullDate(message.editedAt, timeZone)}>
+                  (edited)
+                </span>
+              )}
+            </div>
+          )}
 
-          <IssueEmbeds body={message.body} issues={message.issues} />
-          <MessageLinkPreviews body={message.body} />
+          {!deleted && !editing && <IssueEmbeds body={message.body} issues={message.issues} />}
+          {!deleted && !editing && <MessageLinkPreviews body={message.body} />}
 
           {message.attachments.length > 0 && (
             <div className="mt-2 flex flex-col gap-2">
@@ -269,14 +335,7 @@ function MessageRow({
                   <span className="font-medium">{reaction.count}</span>
                 </button>
               ))}
-              <button
-                type="button"
-                onClick={() => onReact(message.id, '👍')}
-                className="grid size-6 place-items-center rounded-full border border-line bg-paper text-faint opacity-0 transition group-hover:opacity-100 hover:text-ink"
-                aria-label="Add reaction"
-              >
-                <SmilePlus size={12} />
-              </button>
+
             </div>
           )}
 
@@ -300,27 +359,280 @@ function MessageRow({
         </div>
       </div>
 
-      <div className="message-actions absolute -top-4 right-2 z-20 flex items-center gap-1 overflow-visible rounded-[14px] border border-line/70 bg-paper p-1.5 shadow-[var(--kora-shadow-popover)]">
-        {QUICK_REACTIONS.map((emoji) => (
-          <button
-            key={emoji}
-            type="button"
-            onClick={() => onReact(message.id, emoji)}
-            className="grid size-8 place-items-center overflow-visible rounded-[10px] text-[17px] leading-none transition-[background-color,transform] duration-100 hover:bg-line-soft active:scale-[0.96]"
-            aria-label={`React with ${emoji}`}
+      {!deleted && !editing && (
+        <div className="message-actions absolute -top-4 right-2 z-20 flex items-center gap-1 overflow-visible rounded-[14px] border border-line/70 bg-paper p-1.5 shadow-[var(--kora-shadow-popover)]">
+          {QUICK_REACTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => onReact(message.id, emoji)}
+              className="grid size-8 place-items-center overflow-visible rounded-[10px] text-[17px] leading-none transition-[background-color,transform] duration-100 hover:bg-line-soft active:scale-[0.96]"
+              aria-label={`React with ${emoji}`}
+            >
+              {emoji}
+            </button>
+          ))}
+          <ActionIcon
+            ref={pickerAnchor}
+            label="Add reaction"
+            active={pickerOpen}
+            onClick={() => {
+              setMenuOpen(false);
+              setPickerOpen((open) => !open);
+            }}
           >
-            {emoji}
-          </button>
-        ))}
-        <span className="mx-0.5 h-4 w-px bg-line" />
+            <SmilePlus size={15} />
+          </ActionIcon>
+          <span className="mx-0.5 h-4 w-px bg-line" />
+          <ActionIcon label="Reply in thread" onClick={() => onReply(message)}>
+            <CornerUpLeft size={15} />
+          </ActionIcon>
+          {canEdit && (
+            <ActionIcon label="Edit message" onClick={() => setEditing(true)}>
+              <Pencil size={14} />
+            </ActionIcon>
+          )}
+          {hasMenu && (
+            <ActionIcon
+              ref={menuAnchor}
+              label="More actions"
+              active={menuOpen}
+              onClick={() => {
+                setPickerOpen(false);
+                setMenuOpen((open) => !open);
+              }}
+            >
+              <MoreHorizontal size={15} />
+            </ActionIcon>
+          )}
+        </div>
+      )}
+      {pickerOpen && (
+        <EmojiPopover
+          anchor={pickerAnchor}
+          label="Pick a reaction"
+          onClose={() => setPickerOpen(false)}
+          onPick={(emoji) => {
+            setPickerOpen(false);
+            onReact(message.id, emoji);
+          }}
+        />
+      )}
+      {menuOpen && (
+        <MessageMenu anchor={menuAnchor} onClose={() => setMenuOpen(false)}>
+          {actions?.onCopyLink && (
+            <MenuItem
+              icon={<Link2 size={14} />}
+              onClick={() => {
+                setMenuOpen(false);
+                actions.onCopyLink!(message);
+              }}
+            >
+              Copy link
+            </MenuItem>
+          )}
+          {canEdit && (
+            <MenuItem
+              icon={<Pencil size={14} />}
+              onClick={() => {
+                setMenuOpen(false);
+                setEditing(true);
+              }}
+            >
+              Edit message
+            </MenuItem>
+          )}
+          {canDelete && (
+            <MenuItem
+              danger
+              icon={<Trash2 size={14} />}
+              onClick={() => {
+                setMenuOpen(false);
+                actions!.onDelete!(message);
+              }}
+            >
+              Delete message
+            </MenuItem>
+          )}
+        </MessageMenu>
+      )}
+    </div>
+  );
+}
+
+export function ActionIcon({
+  ref,
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  ref?: React.Ref<HTMLButtonElement>;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'grid size-8 place-items-center rounded-[10px] transition-[background-color,color,transform] duration-100 active:scale-[0.96]',
+        active ? 'bg-line-soft text-ink' : 'text-muted hover:bg-line-soft hover:text-ink',
+      )}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function MessageMenu({
+  anchor,
+  onClose,
+  children,
+}: {
+  anchor: React.RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || anchor.current?.contains(target)) return;
+      onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      onClose();
+      anchor.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [anchor, onClose]);
+  return (
+    <FloatingMenu anchor={anchor} menuRef={menuRef} align="end" className="min-w-[180px] p-1">
+      <div role="menu" aria-label="Message actions">
+        {children}
+      </div>
+    </FloatingMenu>
+  );
+}
+
+export function MenuItem({
+  icon,
+  danger,
+  onClick,
+  children,
+}: {
+  icon: React.ReactNode;
+  danger?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={cn(
+        'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] outline-none hover:bg-line-soft focus-visible:bg-line-soft',
+        danger ? 'text-coral-deep' : 'text-ink',
+      )}
+    >
+      <span className={danger ? 'text-coral-deep' : 'text-muted'}>{icon}</span>
+      {children}
+    </button>
+  );
+}
+
+/** Enter saves, Shift+Enter adds a line, Escape cancels. */
+export function EditBox({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (body: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  }, []);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = '0px';
+    element.style.height = `${Math.min(element.scrollHeight, 320)}px`;
+  }, [value]);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(value);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save the edit.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 rounded-xl border border-line bg-paper p-2 focus-within:border-ink/25">
+      <textarea
+        ref={ref}
+        value={value}
+        aria-label="Edit message"
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            onCancel();
+          } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            void save();
+          }
+        }}
+        className="block w-full resize-none bg-transparent text-[14.5px] leading-6 text-ink outline-none"
+        rows={1}
+      />
+      {error && <p className="mt-1 text-[12px] text-coral-deep">{error}</p>}
+      <div className="mt-2 flex items-center justify-end gap-2">
+        <span className="mr-auto text-[11px] text-faint">Escape to cancel, Enter to save</span>
         <button
           type="button"
-          onClick={() => onReply(message)}
-          className="grid size-8 place-items-center rounded-[10px] text-muted transition-[background-color,color,transform] duration-100 hover:bg-line-soft hover:text-ink active:scale-[0.96]"
-          aria-label="Reply in thread"
-          title="Reply in thread"
+          onClick={onCancel}
+          className="h-7 rounded-md px-2.5 text-[12px] font-medium text-muted hover:bg-line-soft hover:text-ink"
         >
-          <CornerUpLeft size={15} />
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          className="h-7 rounded-md bg-ink px-2.5 text-[12px] font-medium text-paper hover:bg-ink-soft disabled:opacity-60"
+        >
+          {saving ? 'Saving' : 'Save'}
         </button>
       </div>
     </div>

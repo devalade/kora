@@ -19,7 +19,7 @@ conversation.
 | `alade@kora.app` | `demo1234` |
 | `amina@kora.app` | `demo1234` |
 | `kwame@kora.app` | `demo1234` |
-| `zane@kora.app` | `demo1234` |
+| `elon@kora.app` | `demo1234` |
 
 Open two browser windows with different accounts to see messages, typing indicators, presence, and
 huddles move between them.
@@ -71,6 +71,20 @@ huddles move between them.
 - "Copy git branch name" on every issue (⌘⇧.)
 - An MCP server for AI agents: personal tokens in Profile → AI agents, eight tools for reading,
   creating, updating and commenting on issues, all recorded as the token's owner
+- Edit and delete messages (admins can delete anyone's), copy a link to any message or reply, and a
+  searchable emoji picker for reactions and the composer
+- Paste or drop files anywhere on the channel to attach them, with the 25 MB limit checked before
+  upload; unsent text is kept per channel and thread
+- A "New" line at the first unread message, a jump-to-latest button, and unread DMs and mentions in
+  the tab title
+- Desktop notifications for DMs and mentions (Profile → Desktop notifications)
+- Rename, mute and leave channels; rename and leave workspaces; reset the invite link; remove members
+- Forgot password by email, reset links that work once for an hour, and change password in Profile
+- Rate limits on messages, uploads, issues, comments, channels and workspaces (MCP included)
+- 404 and error pages, Terms and Privacy, Open Graph tags, robots.txt and a sitemap
+- `?` opens a keyboard shortcut sheet
+- PostHog analytics and client error reporting when `VITE_POSTHOG_KEY` is set (no session
+  recording, text masked); server logs in Workers observability
 - Responsive app shell with a mobile navigation drawer
 
 ## Stack

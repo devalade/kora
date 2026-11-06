@@ -66,10 +66,18 @@ export function Avatar({
   const photo = src && failed !== src ? src : null;
 
   return (
-    <span className={cn('relative inline-grid shrink-0 rounded-full', outerSizes[size], className)}>
+    // leading-none and the single fixed track keep the circle round: an inherited line height (a
+    // 20px history line) used to grow the grid row and stretch a 20px avatar into a 20x22 oval.
+    <span
+      className={cn(
+        'relative inline-grid shrink-0 grid-cols-1 grid-rows-1 rounded-full leading-none',
+        outerSizes[size],
+        className,
+      )}
+    >
       <span
         className={cn(
-          'grid size-full place-items-center rounded-full',
+          'grid size-full grid-cols-1 grid-rows-1 place-items-center overflow-hidden rounded-full',
           ringSizes[size],
           ring && 'ring-2 ring-paper',
         )}
@@ -78,7 +86,7 @@ export function Avatar({
       >
         <span
           className={cn(
-            'grid size-full place-items-center rounded-full font-semibold tracking-wide select-none',
+            'grid size-full place-items-center overflow-hidden rounded-full font-semibold tracking-wide select-none',
             (size === '2xs' || size === 'xs') && 'tracking-normal',
             textSizes[size],
           )}

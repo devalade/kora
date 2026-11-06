@@ -4,6 +4,7 @@ import {
   redirect,
   useNavigate,
   useParams,
+  useRouteContext,
   useRouter,
   type ErrorComponentProps,
 } from '@tanstack/react-router';
@@ -644,7 +645,9 @@ function Detail({
 
 function InboxPending() {
   const { workspaceSlug } = useParams({ strict: false }) as { workspaceSlug: string };
-  const { user } = Route.useRouteContext();
+  // The pending screen can show before beforeLoad resolves, so the session user may not exist yet.
+  // Reading it as required crashed the rail and blanked the whole page on slow loads.
+  const { user } = useRouteContext({ strict: false }) as { user?: { name: string; avatarColor: string; avatarUrl?: string | null } };
   return (
     <div className="flex h-dvh overflow-hidden bg-canvas pb-16 md:pb-0">
       <AppRail workspaceSlug={workspaceSlug} active="inbox" me={user} layout="auto" onSignOut={() => undefined} />

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { getSessionUserFn, signOutFn } from '../lib/auth';
 import { createWorkspaceFn, getWorkspaceOverviewFn, joinWorkspaceFn } from '../lib/chat';
+import { track } from '../lib/analytics';
 import type { WorkspaceOverview } from '../lib/types';
 import { Avatar } from '../components/avatar';
 import { LogoMark, Wordmark } from '../components/logo';
@@ -37,6 +38,7 @@ function AppIndexPage() {
     setBusy(true);
     try {
       const { slug } = await createWorkspaceFn({ data: { name } });
+      track('workspace_created');
       await router.invalidate();
       await navigate({ to: '/app/$workspaceSlug', params: { workspaceSlug: slug } });
     } catch (error) {

@@ -59,6 +59,12 @@ Kora is a Void + TanStack Start app on Cloudflare. Read `README.md` first.
   chat event triggers one per open channel page.
 - The call room gates WebRTC setup on the local media stream. Do not create peer connections before
   camera and microphone resolve.
+- In files with server functions, never call an imported function at module level (for example a
+  shared `or(...)` condition from `void/db`). The TanStack Start compiler follows it, fails to look
+  up `void/db`, and every page returns 500 in dev while `npm run build` still passes. Wrap it in a
+  function and call it inside the handler.
+- Password reset emails go through `sendEmail` from `void/email`. In dev they land in the inbox at
+  `/__void/inbox` (needs the `ASSETS` binding in `void.config.ts`); `scripts/launch.mjs` reads it.
 - The demo data in `db/seed.ts` is the reference for empty-state copy and realistic conversations.
 - Avoid em dashes in product copy.
 

@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { deleteCookie, getCookie } from '@tanstack/react-start/server';
-import { db, eq } from 'void/db';
-import { sessions, users } from '@schema';
+import { and, db, eq, ne } from 'void/db';
+import { passwordResets, sessions, users } from '@schema';
 import { z } from 'zod';
 import { newId } from './ids';
 import { hashPassword, verifyPassword } from './password';
@@ -10,6 +10,8 @@ import {
   LOGIN_EMAIL_CEILING_POLICY,
   LOGIN_IP_POLICY,
   LOGIN_PAIR_POLICY,
+  RESET_EMAIL_POLICY,
+  RESET_IP_POLICY,
   SIGNUP_IP_POLICY,
   clearKey,
   clientIp,
@@ -19,10 +21,19 @@ import {
   loginIpKey,
   loginPairKey,
   recordFailure,
+  resetEmailKey,
+  resetIpKey,
   signupIpKey,
 } from './rate-limit';
 import { publishProfileChange } from './realtime';
-import { SESSION_COOKIE, readSessionUser, startSession, toSessionUser } from './session';
+import {
+  SESSION_COOKIE,
+  readSessionUser,
+  sendPasswordReset,
+  startSession,
+  toSessionUser,
+  userForResetToken,
+} from './session';
 
 // Hash of a random password nobody knows (same scheme and iteration count as real hashes). Checked
 // when the email is unknown so a miss costs as much as a wrong password.
@@ -54,7 +65,7 @@ export const signUpFn = createServerFn({ method: 'POST' })
     if (wait > 0) throw new Error(lockMessage(wait));
     await recordFailure(ipKey, SIGNUP_IP_POLICY);
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
-    if (existing.length > 0) throw new Error('An account with this email already exists.');
+    if (existing.length > 0) throw new Error('This email already has an account. Sign in, or reset your password.');
     const [created] = await db
       .insert(users)
       .values({
@@ -63,7 +74,6 @@ export const signUpFn = createServerFn({ method: 'POST' })
         name: data.name.trim(),
         passwordHash: await hashPassword(data.password),
         avatarColor: pickAvatarColor(email),
-        title: 'Product engineer',
       })
       .returning({
         id: users.id,
@@ -169,4 +179,71 @@ export const updateProfileFn = createServerFn({ method: 'POST' })
       });
     await publishProfileChange(me.id);
     return toSessionUser(updated);
+  });
+
+const newPassword = z.string().min(8, 'Use at least 8 characters').max(200);
+
+/**
+ * Emails a reset link when the address has an account. The answer is the same either way, so the
+ * form never tells a stranger who has an account.
+ */
+export const requestPasswordResetFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ email: z.string().trim().email('Enter a valid email') }))
+  .handler(async ({ data }) => {
+    const email = data.email.trim().toLowerCase();
+    const ipKey = resetIpKey(clientIp());
+    const emailKey = resetEmailKey(email);
+    const wait = Math.max(
+      await lockedSeconds(ipKey, RESET_IP_POLICY),
+      await lockedSeconds(emailKey, RESET_EMAIL_POLICY),
+    );
+    if (wait > 0) throw new Error(lockMessage(wait));
+    await Promise.all([recordFailure(ipKey, RESET_IP_POLICY), recordFailure(emailKey, RESET_EMAIL_POLICY)]);
+    const [user] = await db
+      .select({ id: users.id, email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.email, email));
+    if (user) await sendPasswordReset(user);
+    return { ok: true as const };
+  });
+
+export const checkResetTokenFn = createServerFn({ method: 'GET' })
+  .validator(z.object({ token: z.string().max(100) }))
+  .handler(async ({ data }) => ({ valid: (await userForResetToken(data.token)) !== null }));
+
+/** Sets the new password, signs out every device, and signs this browser in. */
+export const resetPasswordFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ token: z.string().max(100), password: newPassword }))
+  .handler(async ({ data }) => {
+    const userId = await userForResetToken(data.token);
+    if (!userId) throw new Error('This reset link has expired or was already used. Ask for a new one.');
+    await db.update(users).set({ passwordHash: await hashPassword(data.password) }).where(eq(users.id, userId));
+    await db.delete(passwordResets).where(eq(passwordResets.userId, userId));
+    await db.delete(sessions).where(eq(sessions.userId, userId));
+    await startSession(userId);
+    return { ok: true as const };
+  });
+
+/** Needs the current password. Other devices are signed out; this one stays signed in. */
+export const changePasswordFn = createServerFn({ method: 'POST' })
+  .validator(z.object({ currentPassword: z.string().min(1, 'Enter your current password'), newPassword }))
+  .handler(async ({ data }) => {
+    const me = await readSessionUser();
+    if (!me) throw new Error('Sign in required.');
+    const ip = clientIp();
+    const pairKey = loginPairKey(me.email, ip);
+    const wait = await lockedSeconds(pairKey, LOGIN_PAIR_POLICY);
+    if (wait > 0) throw new Error(lockMessage(wait));
+    const [row] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, me.id));
+    if (!row || !(await verifyPassword(data.currentPassword, row.passwordHash))) {
+      await recordFailure(pairKey, LOGIN_PAIR_POLICY);
+      throw new Error('Your current password is incorrect.');
+    }
+    await db.update(users).set({ passwordHash: await hashPassword(data.newPassword) }).where(eq(users.id, me.id));
+    const current = getCookie(SESSION_COOKIE);
+    await db
+      .delete(sessions)
+      .where(current ? and(eq(sessions.userId, me.id), ne(sessions.id, current)) : eq(sessions.userId, me.id));
+    await db.delete(passwordResets).where(eq(passwordResets.userId, me.id));
+    return { ok: true as const };
   });

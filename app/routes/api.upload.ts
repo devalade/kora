@@ -4,6 +4,7 @@ import { attachments } from '@schema';
 import { storage } from 'void/storage';
 import { readSessionUser } from '../lib/session';
 import { newId } from '../lib/ids';
+import { throttleWrite } from '../lib/rate-limit';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 /** Everything one person has uploaded, attached to a message or not. */
@@ -96,6 +97,11 @@ export const Route = createFileRoute('/api/upload')({
           .toLowerCase();
         if (BLOCKED.has(mime) || mime === 'image/svg+xml') {
           return Response.json({ error: 'That file type is not supported.' }, { status: 400 });
+        }
+        try {
+          await throttleWrite('upload', me.id);
+        } catch (error) {
+          return Response.json({ error: (error as Error).message }, { status: 429 });
         }
         await removeAbandonedUploads(me.id).catch(() => undefined);
         const used = await usedBytes(me.id);

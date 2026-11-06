@@ -45,7 +45,31 @@ export const SIGNUP_IP_POLICY: Policy = {
   windowMs: 60 * MINUTE,
   lockMs: 60 * MINUTE,
 };
-const ALL_POLICIES = [LOGIN_PAIR_POLICY, LOGIN_EMAIL_CEILING_POLICY, LOGIN_IP_POLICY, SIGNUP_IP_POLICY];
+// Password reset requests: per email (so nobody floods one inbox) and per client IP.
+export const RESET_EMAIL_POLICY: Policy = { prefix: 'reset:email:', max: 3, windowMs: 60 * MINUTE, lockMs: 60 * MINUTE };
+export const RESET_IP_POLICY: Policy = { prefix: 'reset:ip:', max: 10, windowMs: 60 * MINUTE, lockMs: 60 * MINUTE };
+
+// Writes, per person. Generous for real use, tight enough that a script or a leaked token cannot
+// flood a workspace. Every attempt counts, and reaching `max` refuses writes until the window ends.
+export const WRITE_POLICIES = {
+  message: { prefix: 'write:message:', max: 120, windowMs: MINUTE, lockMs: MINUTE },
+  upload: { prefix: 'write:upload:', max: 60, windowMs: 10 * MINUTE, lockMs: 10 * MINUTE },
+  issue: { prefix: 'write:issue:', max: 120, windowMs: 10 * MINUTE, lockMs: 10 * MINUTE },
+  comment: { prefix: 'write:comment:', max: 120, windowMs: 10 * MINUTE, lockMs: 10 * MINUTE },
+  channel: { prefix: 'write:channel:', max: 30, windowMs: 60 * MINUTE, lockMs: 60 * MINUTE },
+  workspace: { prefix: 'write:workspace:', max: 10, windowMs: 60 * MINUTE, lockMs: 60 * MINUTE },
+} satisfies Record<string, Policy>;
+export type WriteKind = keyof typeof WRITE_POLICIES;
+
+const ALL_POLICIES = [
+  LOGIN_PAIR_POLICY,
+  LOGIN_EMAIL_CEILING_POLICY,
+  LOGIN_IP_POLICY,
+  SIGNUP_IP_POLICY,
+  RESET_EMAIL_POLICY,
+  RESET_IP_POLICY,
+  ...Object.values(WRITE_POLICIES),
+];
 const SHORTEST_WINDOW_MS = Math.min(...ALL_POLICIES.map((policy) => policy.windowMs));
 
 export function clientIp(): string {
@@ -61,12 +85,14 @@ export const loginPairKey = (email: string, ip: string) =>
   `${LOGIN_PAIR_POLICY.prefix}${normalEmail(email)}|${ip}`;
 export const loginIpKey = (ip: string) => `login:ip:${ip}`;
 export const signupIpKey = (ip: string) => `signup:ip:${ip}`;
+export const resetEmailKey = (email: string) => `${RESET_EMAIL_POLICY.prefix}${normalEmail(email)}`;
+export const resetIpKey = (ip: string) => `${RESET_IP_POLICY.prefix}${ip}`;
 
 // In local development every request comes from loopback, so the test scripts' sign-ups would
 // share one IP budget. Production always has a real client IP from Cloudflare. Only pure IP keys are
 // exempt: the email+IP pair and the email ceiling are still enforced in development.
 function exempt(key: string) {
-  return import.meta.env.DEV && /^(login|signup):ip:(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1|unknown)$/.test(key);
+  return import.meta.env.DEV && /^(login|signup|reset):ip:(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1|unknown)$/.test(key);
 }
 
 /** Seconds until the key is unlocked, or 0 when it is not locked. Also deletes a dead row. */
@@ -157,4 +183,22 @@ export async function clearKey(key: string): Promise<void> {
 export function lockMessage(seconds: number): string {
   const minutes = Math.max(1, Math.ceil(seconds / 60));
   return `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+}
+
+/**
+ * Counts one write of this kind for the person and throws once they are over the limit. Call it
+ * after the permission checks and before the write.
+ */
+export async function throttleWrite(kind: WriteKind, userId: string): Promise<void> {
+  const policy = WRITE_POLICIES[kind];
+  const key = `${policy.prefix}${userId}`;
+  const wait = await lockedSeconds(key, policy);
+  if (wait > 0) throw new Error(writeLockMessage(wait));
+  await recordFailure(key, policy);
+}
+
+function writeLockMessage(seconds: number): string {
+  if (seconds < 90) return `You are doing that too fast. Try again in ${seconds} seconds.`;
+  const minutes = Math.ceil(seconds / 60);
+  return `You are doing that too fast. Try again in ${minutes} minutes.`;
 }

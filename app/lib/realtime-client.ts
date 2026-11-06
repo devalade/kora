@@ -158,9 +158,10 @@ class WorkspaceSocket {
   private onOnline = () => this.reconnectNow();
 
   // Closing the tab: say goodbye so others see this person go offline at once, not after a timeout.
+  // Browsers only let a page close with 1000 or 3000-4999; 1001 threw and skipped the goodbye.
   private onPageHide = () => {
     this.stopKeepalive();
-    this.socket?.close(1001, 'page hidden');
+    this.socket?.close(1000, 'page hidden');
   };
 
   // Back from the browser's back/forward cache.

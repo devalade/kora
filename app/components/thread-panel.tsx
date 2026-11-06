@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { Link2, MoreHorizontal, Pencil, SmilePlus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { getThreadFn, sendMessageFn, setTypingFn, toggleReactionFn } from '../lib/chat';
@@ -8,7 +8,8 @@ import { clockTime, fullDate, plural } from '../lib/format';
 import { MessageComposer } from './message-composer';
 import { IssueEmbeds } from './issue-embed';
 import { MessageLinkPreviews } from './link-preview';
-import { TypingRow } from './message-list';
+import { ActionIcon, EditBox, MenuItem, MessageMenu, TypingRow, type MessageActions } from './message-list';
+import { EmojiPopover } from './emoji-picker';
 import { RichText } from './rich-text';
 import { useLiveRefresh } from '../lib/realtime-client';
 import { useDisplayTimeZone } from '../lib/use-display-time-zone';
@@ -39,6 +40,7 @@ export function ThreadPanel({
   onClose,
   onChanged,
   onMentionClick,
+  actions,
 }: {
   workspaceSlug: string;
   messageId: string;
@@ -48,6 +50,8 @@ export function ThreadPanel({
   onClose: () => void;
   onChanged: () => void;
   onMentionClick?: (userId: string) => void;
+  /** Edit, delete and copy link; the panel refreshes itself after an edit or delete. */
+  actions?: MessageActions;
 }) {
   const [thread, setThread] = useState<ThreadView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +130,16 @@ export function ThreadPanel({
     await refresh();
   }
 
+  const threadActions: MessageActions | undefined = actions && {
+    ...actions,
+    onEdit: actions.onEdit
+      ? async (message, body) => {
+          await actions.onEdit!(message, body);
+          await refresh();
+        }
+      : undefined,
+  };
+
   return (
     <aside className="flex h-full w-full shrink-0 flex-col border-l border-line bg-paper xl:w-[380px]">
       <header className="flex items-center justify-between border-b border-line px-4 py-3.5">
@@ -155,6 +169,7 @@ export function ThreadPanel({
               members={members}
               meId={meId}
               onMentionClick={onMentionClick}
+              actions={threadActions}
               large
             />
             {thread.replies.length > 0 && (
@@ -173,6 +188,7 @@ export function ThreadPanel({
                 members={members}
                 meId={meId}
                 onMentionClick={onMentionClick}
+                actions={threadActions}
               />
             ))}
           </div>
@@ -190,6 +206,7 @@ export function ThreadPanel({
           members={members}
           onSend={reply}
           onTyping={onTyping}
+          draftKey={`thread:${messageId}`}
         />
       </div>
     </aside>
@@ -202,6 +219,7 @@ function ThreadMessage({
   members,
   meId,
   onMentionClick,
+  actions,
   large,
 }: {
   message: MessageView;
@@ -209,11 +227,84 @@ function ThreadMessage({
   members?: UserSummary[];
   meId?: string;
   onMentionClick?: (userId: string) => void;
+  actions?: MessageActions;
   large?: boolean;
 }) {
   const timeZone = useDisplayTimeZone();
+  const [editing, setEditing] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pickerAnchor = useRef<HTMLButtonElement>(null);
+  const menuAnchor = useRef<HTMLButtonElement>(null);
+  const deleted = Boolean(message.deletedAt);
+  const isMine = message.author.id === meId;
+  const canEdit = Boolean(actions?.onEdit && isMine && !deleted);
+  const canDelete = Boolean(actions?.onDelete && (isMine || actions.canModerate) && !deleted);
   return (
-    <article className={cn('flex gap-3', large && 'rounded-2xl bg-canvas p-3')}>
+    <article
+      id={`message-${message.id}`}
+      data-message-id={message.id}
+      className={cn(
+        'message-row group relative flex gap-3',
+        large && 'rounded-2xl bg-canvas p-3',
+        (pickerOpen || menuOpen) && 'is-active',
+      )}
+    >
+      {!deleted && !editing && (
+        <div className="message-actions absolute -top-3 right-0 z-20 flex items-center gap-0.5 rounded-[12px] border border-line/70 bg-paper p-1 shadow-[var(--kora-shadow-popover)]">
+          <ActionIcon ref={pickerAnchor} label="Add reaction" active={pickerOpen} onClick={() => setPickerOpen((open) => !open)}>
+            <SmilePlus size={14} />
+          </ActionIcon>
+          {canEdit && (
+            <ActionIcon label="Edit message" onClick={() => setEditing(true)}>
+              <Pencil size={13} />
+            </ActionIcon>
+          )}
+          {(canDelete || actions?.onCopyLink) && (
+            <ActionIcon ref={menuAnchor} label="More actions" active={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+              <MoreHorizontal size={14} />
+            </ActionIcon>
+          )}
+        </div>
+      )}
+      {pickerOpen && (
+        <EmojiPopover
+          anchor={pickerAnchor}
+          label="Pick a reaction"
+          onClose={() => setPickerOpen(false)}
+          onPick={(emoji) => {
+            setPickerOpen(false);
+            onReact(message.id, emoji);
+          }}
+        />
+      )}
+      {menuOpen && (
+        <MessageMenu anchor={menuAnchor} onClose={() => setMenuOpen(false)}>
+          {actions?.onCopyLink && (
+            <MenuItem
+              icon={<Link2 size={14} />}
+              onClick={() => {
+                setMenuOpen(false);
+                actions.onCopyLink!(message);
+              }}
+            >
+              Copy link
+            </MenuItem>
+          )}
+          {canDelete && (
+            <MenuItem
+              danger
+              icon={<Trash2 size={14} />}
+              onClick={() => {
+                setMenuOpen(false);
+                actions!.onDelete!(message);
+              }}
+            >
+              Delete message
+            </MenuItem>
+          )}
+        </MessageMenu>
+      )}
       <Avatar name={message.author.name} src={message.author.avatarUrl} color={message.author.avatarColor} size={large ? 'md' : 'sm'} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
@@ -222,17 +313,31 @@ function ThreadMessage({
             {clockTime(message.createdAt, timeZone)}
           </span>
         </div>
-        <div className="mt-0.5 text-[13.5px] leading-6 text-ink-soft">
-          <RichText
-            body={message.body}
-            issues={message.issues}
-            members={members}
-            meId={meId}
-            onMentionClick={onMentionClick}
+        {deleted ? (
+          <p className="mt-0.5 text-[13.5px] leading-6 text-faint italic">This message was deleted.</p>
+        ) : editing && actions?.onEdit ? (
+          <EditBox
+            initial={message.body}
+            onCancel={() => setEditing(false)}
+            onSave={async (body) => {
+              await actions.onEdit!(message, body);
+              setEditing(false);
+            }}
           />
-        </div>
-        <IssueEmbeds body={message.body} issues={message.issues} compact />
-        <MessageLinkPreviews body={message.body} compact />
+        ) : (
+          <div className="mt-0.5 text-[13.5px] leading-6 text-ink-soft">
+            <RichText
+              body={message.body}
+              issues={message.issues}
+              members={members}
+              meId={meId}
+              onMentionClick={onMentionClick}
+            />
+            {message.editedAt && <span className="ml-1 text-[11px] text-faint">(edited)</span>}
+          </div>
+        )}
+        {!deleted && !editing && <IssueEmbeds body={message.body} issues={message.issues} compact />}
+        {!deleted && !editing && <MessageLinkPreviews body={message.body} compact />}
         {message.attachments.length > 0 && (
           <div className="mt-2 space-y-1.5">
             {message.attachments.map((attachment) =>

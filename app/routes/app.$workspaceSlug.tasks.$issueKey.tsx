@@ -89,7 +89,13 @@ export const Route = createFileRoute('/app/$workspaceSlug/tasks/$issueKey')({
     ]);
     return { snapshot, detail };
   },
-  head: () => ({ meta: [{ title: 'Issue · Kora' }] }),
+  head: ({ loaderData }) => ({
+    meta: [
+      {
+        title: loaderData ? `${loaderData.detail.issue.key} ${loaderData.detail.issue.title} · Kora` : 'Issue · Kora',
+      },
+    ],
+  }),
   errorComponent: IssueError,
   component: IssuePage,
 });

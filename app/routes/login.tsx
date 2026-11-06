@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { getSessionUserFn, signInFn } from '../lib/auth';
 import { AuthLayout } from '../components/auth-layout';
 import { DEMO_EMAIL, DEMO_PASSWORD } from '../lib/demo';
+import { errorMessage } from '../lib/errors';
 
 function safeRedirect(value: unknown) {
   return typeof value === 'string' &&
@@ -12,19 +13,6 @@ function safeRedirect(value: unknown) {
     !value.includes('\\')
     ? value
     : undefined;
-}
-
-// Server errors arrive as plain messages (lockout, bad credentials) or, for failed validation, as
-// a JSON list of issues. Show the first readable message either way.
-function errorMessage(caught: unknown, fallback: string) {
-  if (!(caught instanceof Error)) return fallback;
-  try {
-    const issues: unknown = JSON.parse(caught.message);
-    if (Array.isArray(issues) && typeof issues[0]?.message === 'string') return issues[0].message;
-  } catch {
-    // Not JSON: the message is already readable.
-  }
-  return caught.message || fallback;
 }
 
 export const Route = createFileRoute('/login')({
@@ -126,7 +114,16 @@ function LoginPage() {
           </div>
         </label>
         <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold text-ink-soft">Password</span>
+          <span className="mb-1.5 flex items-baseline justify-between">
+            <span className="text-xs font-semibold text-ink-soft">Password</span>
+            <Link
+              to="/forgot-password"
+              search={{ email: email || undefined }}
+              className="text-xs font-medium text-muted underline decoration-line underline-offset-4 hover:text-ink hover:decoration-ink"
+            >
+              Forgot password?
+            </Link>
+          </span>
           <div className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 focus-within:border-ink/30">
             <LockKeyhole size={15} className="text-faint" />
             <input

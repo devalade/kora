@@ -1,6 +1,7 @@
 import { AgentAccessDialog } from '../components/agent-access-dialog';
 import { createFileRoute, redirect, useNavigate, useRouter } from '@tanstack/react-router';
 import {
+  ArrowDown,
   Hash,
   Info,
   Menu,
@@ -13,6 +14,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
+  deleteMessageFn,
+  editMessageFn,
   getChannelPageFn,
   markReadFn,
   openDmFn,
@@ -37,7 +40,10 @@ import {
 } from '../components/dialogs';
 import { ImageLightbox } from '../components/image-lightbox';
 import { MessageComposer } from '../components/message-composer';
-import { MessageList } from '../components/message-list';
+import { MessageList, type MessageActions } from '../components/message-list';
+import { Modal } from '../components/modal';
+import { showNotification } from '../lib/notifications';
+import { track } from '../lib/analytics';
 import { ThreadPanel } from '../components/thread-panel';
 import { WorkspaceSidebar } from '../components/workspace-sidebar';
 import { relativeTime } from '../lib/format';
@@ -47,7 +53,14 @@ import { cn } from '../utils/cn';
 /** A little longer than the server's typing window (TYPING_WINDOW_MS in chat.ts). */
 const TYPING_LAPSE_MS = 5_500;
 
+/** `m` scrolls to and highlights a message; `thread` opens a thread. Both come from copied links. */
+type ChannelSearch = { m?: string; thread?: string };
+
 export const Route = createFileRoute('/app/$workspaceSlug/$channelId')({
+  validateSearch: (search: Record<string, unknown>): ChannelSearch => ({
+    m: typeof search.m === 'string' ? search.m.slice(0, 64) : undefined,
+    thread: typeof search.thread === 'string' ? search.thread.slice(0, 64) : undefined,
+  }),
   beforeLoad: async () => {
     const user = await getSessionUserFn();
     if (!user) throw redirect({ to: '/login' });
@@ -128,6 +141,13 @@ function WorkspacePage() {
   const paramsRef = useRef({ slug: params.workspaceSlug, channelId: params.channelId });
   const typingAt = useRef(0);
   const lastMessageId = useRef<string | null>(null);
+  const search = Route.useSearch();
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [unreadAfter, setUnreadAfter] = useState<string | null>(null);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const [newWhileAway, setNewWhileAway] = useState(0);
+  const [deleting, setDeleting] = useState<MessageView | null>(null);
+  const previousRef = useRef<WorkspaceSnapshot>(initial);
 
   const channel = snapshot.channel;
   const channelLabel = channel?.kind === 'dm'
@@ -154,6 +174,8 @@ function WorkspacePage() {
         paramsRef.current.slug === target.slug &&
         paramsRef.current.channelId === target.channelId
       ) {
+        notifyAbout(previousRef.current, next);
+        previousRef.current = next;
         setSnapshot(next);
         setHasMore(next.hasMore);
         if (
@@ -164,11 +186,45 @@ function WorkspacePage() {
         }
         return snapshotToken(next);
       }
-    } catch {
-      // A dropped poll is recovered by the next tick.
+    } catch (error) {
+      // Removed from the workspace (or it is gone): leave instead of showing stale messages.
+      const message = error instanceof Error ? error.message : '';
+      if (/not a member of this workspace|Workspace not found/.test(message)) {
+        toast.error('You no longer have access to this workspace.');
+        void navigate({ to: '/app' });
+      }
+      // Anything else is recovered by the next realtime refresh.
     }
     return null;
   }, [params.workspaceSlug, params.channelId]);
+
+  /** A notification for each conversation that gained a DM or a mention since the last refresh. */
+  function notifyAbout(before: WorkspaceSnapshot, after: WorkspaceSnapshot) {
+    const watching = document.visibilityState === 'visible' && document.hasFocus();
+    const old = new Map([...before.channels, ...before.dms].map((item) => [item.id, item]));
+    for (const dm of after.dms) {
+      const was = old.get(dm.id);
+      if (!was || dm.unread <= was.unread || dm.muted) continue;
+      if (watching && dm.id === after.channel?.id) continue;
+      showNotification({
+        title: dm.peer?.name ?? 'New direct message',
+        body: dm.unread === 1 ? 'Sent you a message' : `Sent you ${dm.unread} messages`,
+        tag: `dm:${dm.id}:${dm.unread}`,
+        onClick: () => void openChannel(dm.id),
+      });
+    }
+    for (const channel of after.channels) {
+      const was = old.get(channel.id);
+      if (!was || channel.mentions <= was.mentions) continue;
+      if (watching && channel.id === after.channel?.id) continue;
+      showNotification({
+        title: `#${channel.name}`,
+        body: 'You were mentioned',
+        tag: `mention:${channel.id}:${channel.mentions}`,
+        onClick: () => void openChannel(channel.id),
+      });
+    }
+  }
 
   useEffect(() => {
     paramsRef.current = { slug: params.workspaceSlug, channelId: params.channelId };
@@ -182,6 +238,7 @@ function WorkspacePage() {
   }, [params.workspaceSlug, params.channelId]);
 
   useEffect(() => {
+    previousRef.current = initial;
     setSnapshot(initial);
     setOlder([]);
     setHasMore(initial.hasMore);
@@ -230,13 +287,66 @@ function WorkspacePage() {
   useEffect(() => {
     const last = messages[messages.length - 1]?.id ?? null;
     if (!last) return;
-    if (last !== lastMessageId.current && stickRef.current) {
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ block: 'end' });
-      });
+    if (last !== lastMessageId.current) {
+      if (stickRef.current) {
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ block: 'end' });
+        });
+      } else if (lastMessageId.current !== null) {
+        setNewWhileAway((count) => count + 1);
+      }
     }
     lastMessageId.current = last;
   }, [messages]);
+
+  // The "New" line sits where the viewer stopped reading when they opened the channel, and stays
+  // there while they read on.
+  useEffect(() => {
+    setUnreadAfter(channel && channel.unread > 0 ? channel.lastReadAt : null);
+    setAwayFromBottom(false);
+    setNewWhileAway(0);
+    // Only on opening a channel: later refreshes mark it read and must not move the line.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel?.id]);
+
+  // Links: `?thread=` opens a thread, `?m=` scrolls to a message, loading older pages to find it.
+  useEffect(() => {
+    if (search.thread) setThreadId(search.thread);
+  }, [search.thread, params.channelId]);
+
+  useEffect(() => {
+    if (!search.m) return;
+    const target = search.m;
+    if (!messages.some((message) => message.id === target)) {
+      if (hasMore && !loadingMore && older.length < 500) void loadMore();
+      return;
+    }
+    stickRef.current = false;
+    setHighlightId(target);
+    requestAnimationFrame(() => {
+      document.getElementById(`message-${target}`)?.scrollIntoView({ block: 'center' });
+    });
+    const timer = setTimeout(() => setHighlightId(null), 2400);
+    void navigate({ to: '.', search: {}, replace: true });
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.m, messages, hasMore, loadingMore]);
+
+  // Tab title: the conversation, plus a count of DMs and mentions waiting elsewhere.
+  useEffect(() => {
+    if (!channel) return;
+    const others = [...snapshot.channels.filter((item) => item.isMember), ...snapshot.dms].filter(
+      (item) => item.id !== channel.id,
+    );
+    const urgent = others.reduce(
+      (sum, item) => sum + item.mentions + (item.kind === 'dm' && !item.muted ? item.unread : 0),
+      0,
+    );
+    const unreadElsewhere = others.some((item) => item.unread > 0 && !item.muted);
+    const prefix = urgent > 0 ? `(${urgent}) ` : unreadElsewhere ? '• ' : '';
+    const label = channel.kind === 'dm' ? channelLabel : `#${channelLabel}`;
+    document.title = `${prefix}${label} · ${snapshot.workspace.name} · Kora`;
+  }, [channel, channelLabel, snapshot.channels, snapshot.dms, snapshot.workspace.name]);
 
   // The list is bottom-anchored in CSS (column-reverse), where scrollTop 0 is the newest message.
   // Switching channels resets to it; the first paint, server HTML included, already starts there.
@@ -324,6 +434,7 @@ function WorkspacePage() {
     await sendMessageFn({
       data: { channelId: channel.id, body, attachmentIds },
     });
+    track('message_sent', { kind: channel.kind, files: attachmentIds.length });
     stickRef.current = true;
     await load();
     requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: 'end' }));
@@ -348,6 +459,43 @@ function WorkspacePage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Reaction failed.');
     }
+  }
+
+  const isAdmin = snapshot.workspace.role === 'owner' || snapshot.workspace.role === 'admin';
+  const messageActions: MessageActions = {
+    canModerate: isAdmin,
+    onEdit: async (message, body) => {
+      await editMessageFn({ data: { messageId: message.id, body } });
+      await load();
+    },
+    onDelete: (message) => setDeleting(message),
+    onCopyLink: (message) => {
+      const query = message.parentId ? `thread=${message.parentId}` : `m=${message.id}`;
+      const url = `${window.location.origin}/app/${params.workspaceSlug}/${message.channelId}?${query}`;
+      void navigator.clipboard.writeText(url).then(
+        () => toast.success('Link copied.'),
+        () => toast.error('Could not copy the link.'),
+      );
+    },
+  };
+
+  async function confirmDelete() {
+    const message = deleting;
+    if (!message) return;
+    setDeleting(null);
+    try {
+      await deleteMessageFn({ data: { messageId: message.id } });
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not delete the message.');
+    }
+  }
+
+  function jumpToLatest() {
+    stickRef.current = true;
+    setAwayFromBottom(false);
+    setNewWhileAway(0);
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function joinHuddle() {
@@ -491,7 +639,7 @@ function WorkspacePage() {
             <HeaderButton label="Channel details" onClick={() => setDetailsOpen(true)}>
               <Info size={17} />
             </HeaderButton>
-            <div className="hidden md:block">
+            <div>
               <HeaderButton
                 label="Members"
                 onClick={() => {
@@ -513,7 +661,11 @@ function WorkspacePage() {
                 const element = scrollRef.current;
                 if (!element) return;
                 // column-reverse: scrollTop is 0 at the bottom and negative above it.
-                stickRef.current = Math.abs(element.scrollTop) < 140;
+                const distance = Math.abs(element.scrollTop);
+                stickRef.current = distance < 140;
+                const away = distance > 600;
+                if (away !== awayFromBottom) setAwayFromBottom(away);
+                if (!away && newWhileAway > 0) setNewWhileAway(0);
               }}
               className="scroll-thin flex min-h-0 flex-1 flex-col-reverse overflow-y-auto"
             >
@@ -541,10 +693,26 @@ function WorkspacePage() {
                   onOpenThread={(message) => setThreadId(message.id)}
                   onImageOpen={(url, name) => setLightbox({ url, name })}
                   onMentionClick={openDmWith}
+                  actions={messageActions}
+                  unreadAfter={unreadAfter}
+                  highlightId={highlightId}
                 />
                 <div ref={bottomRef} className="h-4" />
               </div>
             </div>
+
+            {(awayFromBottom || newWhileAway > 0) && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={jumpToLatest}
+                  className="absolute -top-12 left-1/2 z-20 inline-flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-paper px-3 text-[12px] font-medium text-ink shadow-[var(--kora-shadow-popover)] transition-[background-color,transform] duration-150 hover:bg-canvas active:scale-[0.97]"
+                >
+                  <ArrowDown size={13} />
+                  {newWhileAway > 0 ? `${newWhileAway} new ${newWhileAway === 1 ? 'message' : 'messages'}` : 'Jump to latest'}
+                </button>
+              </div>
+            )}
 
             {snapshot.call && !joinedCall && (
               <div className="mx-5 mb-3 flex items-center justify-between gap-3 rounded-2xl border border-mint-deep/20 bg-mint/30 px-4 py-2.5">
@@ -579,6 +747,8 @@ function WorkspacePage() {
               members={snapshot.members}
               onSend={send}
               onTyping={onTyping}
+              draftKey={channel.id}
+              acceptPageDrops={!threadId}
             />
           </section>
 
@@ -593,6 +763,7 @@ function WorkspacePage() {
               onMentionClick={openDmWith}
               onClose={() => setThreadId(null)}
               onChanged={() => void load()}
+              actions={messageActions}
             />
           ) : membersOpen ? (
             <MembersPanel
@@ -627,7 +798,13 @@ function WorkspacePage() {
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
         snapshot={snapshot}
-        onOpenChannel={(channelId) => void openChannel(channelId)}
+        onOpenChannel={(channelId, messageId, thread) =>
+          void navigate({
+            to: '/app/$workspaceSlug/$channelId',
+            params: { workspaceSlug: params.workspaceSlug, channelId },
+            search: { m: messageId, thread },
+          })
+        }
       />
       <ProfileDialog
         open={profileOpen}
@@ -644,7 +821,41 @@ function WorkspacePage() {
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
         snapshot={snapshot}
+        onChanged={() => void load()}
+        onLeft={() =>
+          // The workspace index opens the first channel they are still in.
+          void navigate({ to: '/app/$workspaceSlug', params: { workspaceSlug: params.workspaceSlug } })
+        }
       />
+      <Modal
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title="Delete message?"
+        description={
+          deleting && deleting.author.id !== snapshot.me.id
+            ? `This removes ${deleting.author.name.split(' ')[0]}'s message for everyone. It cannot be undone.`
+            : 'This removes the message and its files for everyone. It cannot be undone.'
+        }
+        width="max-w-md"
+      >
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setDeleting(null)}
+            className="h-10 rounded-xl px-4 text-sm font-medium text-muted hover:bg-line-soft"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            autoFocus
+            onClick={() => void confirmDelete()}
+            className="h-10 rounded-xl bg-danger px-4 text-sm font-semibold text-white hover:bg-danger/90"
+          >
+            Delete
+          </button>
+        </div>
+      </Modal>
 
       {lightbox && (
         <ImageLightbox
@@ -761,7 +972,10 @@ function MembersPanel({
   const online = snapshot.channelMembers.filter((member) => member.online);
   const offline = snapshot.channelMembers.filter((member) => !member.online);
   return (
-    <aside className="hidden w-[260px] shrink-0 flex-col border-l border-line bg-paper lg:flex">
+    <>
+    {/* Phones and tablets: a sheet over the chat, closed by tapping outside. */}
+    <button type="button" aria-label="Close people" onClick={onClose} className="fixed inset-0 z-30 bg-ink/30 lg:hidden" />
+    <aside className="fixed inset-y-0 right-0 z-40 flex w-[min(300px,85vw)] shrink-0 flex-col border-l border-line bg-paper shadow-[var(--kora-shadow-popover)] lg:static lg:z-auto lg:w-[260px] lg:shadow-none">
       <div className="flex items-center justify-between border-b border-line px-4 py-3.5">
         <div>
           <h2 className="text-sm font-semibold">People</h2>
@@ -782,6 +996,7 @@ function MembersPanel({
         <MemberGroup label={`Offline · ${offline.length}`} members={offline} onOpenDm={onOpenDm} />
       </div>
     </aside>
+    </>
   );
 }
 

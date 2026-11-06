@@ -71,7 +71,7 @@ try {
 
   await rail.getByRole('link', { name: /Inbox/ }).click();
   await page.waitForURL('**/inbox');
-  const list = page.getByRole('region', { name: 'Notifications' });
+  const list = page.getByRole('region', { name: 'Notifications', exact: true });
   await list.getByText('Amina assigned you KOR-4', { exact: true }).waitFor({ timeout: 15000 });
   await list.getByText('Amina mentioned you in #design').waitFor();
   check('both items are listed', true);
@@ -111,6 +111,22 @@ try {
   await page.getByRole('link', { name: 'Open issue' }).click();
   await page.waitForURL('**/tasks/KOR-4', { timeout: 15000 });
   check('Open issue goes to the issue page', page.url().endsWith('/tasks/KOR-4'));
+
+  // A slow load shows the loading screen before the session resolves. It used to read the user as
+  // required, crash the rail and blank the whole page. A full load first, so no cached inbox is reused.
+  await page.goto(`${base}/app/kora-studio/ch-general`, { waitUntil: 'networkidle' });
+  await page.route('**/_serverFn/**', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await route.continue().catch(() => undefined);
+  });
+  await page.locator('a[href$="/inbox"]').first().click();
+  const pendingShown = await page
+    .getByRole('region', { name: 'Loading notifications' })
+    .waitFor({ timeout: 3000 })
+    .then(() => true, () => false);
+  await page.getByRole('region', { name: 'Notifications', exact: true }).waitFor({ timeout: 15000 });
+  await page.unroute('**/_serverFn/**');
+  check('slow inbox load shows the loading screen, then the inbox', pendingShown);
 
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (error) {

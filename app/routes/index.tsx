@@ -335,6 +335,12 @@ function LandingPage() {
             <Link to="/login" className="hover:text-ink">
               Sign in
             </Link>
+            <Link to="/terms" className="hover:text-ink">
+              Terms
+            </Link>
+            <Link to="/privacy" className="hover:text-ink">
+              Privacy
+            </Link>
           </div>
         </div>
       </footer>

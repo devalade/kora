@@ -28,6 +28,7 @@ import {
 import type { UserSummary } from '../lib/types';
 import { cn } from '../utils/cn';
 import { Avatar } from './avatar';
+import { EmojiPopover } from './emoji-picker';
 import { TaskStatusIcon } from './task-icons';
 
 type Draft = {
@@ -43,26 +44,28 @@ type Draft = {
   file: File;
 };
 
-const EMOJIS = [
-  '👍',
-  '✅',
-  '🎉',
-  '❤️',
-  '🔥',
-  '👀',
-  '🙏',
-  '😂',
-  '🚀',
-  '💡',
-  '😍',
-  '🤝',
-  '💯',
-  '✨',
-  '👏',
-  '😅',
-  '🫡',
-  '☕',
-];
+/** The server refuses larger files (api/upload.ts); checking first saves a doomed upload. */
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const DRAFT_PREFIX = 'kora.draft.';
+
+function readDraft(key: string | undefined) {
+  if (!key) return '';
+  try {
+    return window.localStorage.getItem(DRAFT_PREFIX + key) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function writeDraft(key: string | undefined, text: string) {
+  if (!key) return;
+  try {
+    if (text.trim()) window.localStorage.setItem(DRAFT_PREFIX + key, text);
+    else window.localStorage.removeItem(DRAFT_PREFIX + key);
+  } catch {
+    // Drafts are a convenience; a full or blocked storage just means no draft.
+  }
+}
 
 const MAX_FILES = 6;
 
@@ -89,9 +92,15 @@ export function MessageComposer({
   onCancelReply,
   onSend,
   onTyping,
+  draftKey,
+  acceptPageDrops,
 }: {
   channelLabel: string;
   placeholder?: string;
+  /** Unsent text is kept per key (a channel or a thread) in this browser. */
+  draftKey?: string;
+  /** Files dropped anywhere on the page attach here (the channel composer, not the thread one). */
+  acceptPageDrops?: boolean;
   compact?: boolean;
   replyingTo?: string;
   members?: UserSummary[];
@@ -105,7 +114,7 @@ export function MessageComposer({
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [mention, setMention] = useState<MentionTrigger | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
-  const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
   const [hash, setHash] = useState<HashTrigger | null>(null);
   const [hashIndex, setHashIndex] = useState(0);
   const [hashResults, setHashResults] = useState<(IssueRefSearch & { query: string }) | null>(null);
@@ -113,7 +122,6 @@ export function MessageComposer({
   const hashPopoverRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const emojiPopoverRef = useRef<HTMLDivElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const mentionPopoverRef = useRef<HTMLDivElement>(null);
   const mentionButtonRef = useRef<HTMLButtonElement>(null);
@@ -183,13 +191,10 @@ export function MessageComposer({
   }, [hash]);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem('kora.recentEmojis');
-    if (stored) {
-      try {
-        setRecentEmojis(JSON.parse(stored) as string[]);
-      } catch {
-        // Ignore a malformed local list.
-      }
+    const saved = readDraft(draftKey);
+    if (saved) {
+      setBody(saved);
+      requestAnimationFrame(resize);
     }
     return () => {
       if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -204,26 +209,50 @@ export function MessageComposer({
     draftsRef.current = drafts;
   }, [drafts]);
 
+  // Keep the draft as it is typed.
   useEffect(() => {
-    if (!emojiOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (emojiPopoverRef.current?.contains(event.target as Node)) return;
-      if (emojiButtonRef.current?.contains(event.target as Node)) return;
-      setEmojiOpen(false);
+    writeDraft(draftKey, body);
+  }, [draftKey, body]);
+
+  // Dropping files anywhere on the page attaches them here.
+  useEffect(() => {
+    if (!acceptPageDrops) return;
+    let depth = 0;
+    const hasFiles = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes('Files'));
+    const onEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      depth += 1;
+      setDragging(true);
     };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setEmojiOpen(false);
-        emojiButtonRef.current?.focus();
-      }
+    const onOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
     };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
+    const onLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      depth = 0;
+      setDragging(false);
+      pickFilesRef.current([...(event.dataTransfer?.files ?? [])]);
+      textRef.current?.focus();
+    };
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
     return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('dragenter', onEnter);
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop);
     };
-  }, [emojiOpen]);
+  }, [acceptPageDrops]);
 
   useEffect(() => {
     if (!mention) return;
@@ -362,6 +391,13 @@ export function MessageComposer({
   }
 
   function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    // A pasted screenshot or copied file attaches like a picked one.
+    const files = [...event.clipboardData.files];
+    if (files.length > 0) {
+      event.preventDefault();
+      pickFiles(files);
+      return;
+    }
     const html = event.clipboardData.getData('text/html');
     if (!html) return;
     const markdown = htmlToMarkdown(html);
@@ -420,9 +456,18 @@ export function MessageComposer({
     xhr.send(form);
   }
 
-  function pickFiles(fileList: FileList | null) {
+  function pickFiles(fileList: FileList | File[] | null) {
     setEmojiOpen(false);
-    const chosen = [...(fileList ?? [])];
+    const all = [...(fileList ?? [])];
+    const tooBig = all.filter((file) => file.size > MAX_FILE_BYTES);
+    if (tooBig.length > 0) {
+      toast.error(
+        tooBig.length === 1
+          ? `${tooBig[0].name} is over the 25 MB limit.`
+          : `${tooBig.length} files are over the 25 MB limit.`,
+      );
+    }
+    const chosen = all.filter((file) => file.size <= MAX_FILE_BYTES);
     if (chosen.length === 0) return;
     const room = Math.max(0, MAX_FILES - drafts.length);
     if (chosen.length > room) {
@@ -445,6 +490,9 @@ export function MessageComposer({
       startUpload(localId, file);
     }
   }
+
+  const pickFilesRef = useRef(pickFiles);
+  pickFilesRef.current = pickFiles;
 
   function removeDraft(localId: string) {
     xhrs.current.get(localId)?.abort();
@@ -472,11 +520,7 @@ export function MessageComposer({
     const end = element?.selectionEnd ?? body.length;
     const next = `${body.slice(0, start)}${emoji}${body.slice(end)}`;
     setBody(next);
-    setRecentEmojis((current) => {
-      const updated = [emoji, ...current.filter((item) => item !== emoji)].slice(0, 6);
-      window.localStorage.setItem('kora.recentEmojis', JSON.stringify(updated));
-      return updated;
-    });
+    setEmojiOpen(false);
     requestAnimationFrame(() => {
       element?.focus();
       const position = start + emoji.length;
@@ -498,6 +542,7 @@ export function MessageComposer({
         if (draft.previewUrl) URL.revokeObjectURL(draft.previewUrl);
       }
       setBody('');
+      writeDraft(draftKey, '');
       setDrafts([]);
       setEmojiOpen(false);
       setMention(null);
@@ -518,8 +563,14 @@ export function MessageComposer({
       className={cn(
         'group/composer relative rounded-[18px] border border-line/80 bg-paper shadow-[var(--kora-shadow-composer)] transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-ink/20 focus-within:shadow-[var(--kora-shadow-composer-focus)]',
         compact ? 'mx-0' : 'mx-5 mb-5',
+        dragging && 'border-coral/60 shadow-[0_0_0_4px_rgba(239,95,62,0.12)]',
       )}
     >
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-[18px] bg-paper/90 text-[13px] font-medium text-coral-deep">
+          Drop files to share in {channelLabel}
+        </div>
+      )}
       {replyingTo && (
         <div className="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2 text-xs text-muted">
           <span>
@@ -659,7 +710,7 @@ export function MessageComposer({
             }}
           />
           <ComposerIcon
-            label="Attach a file"
+            label="Attach files (up to 25 MB each)"
             onClick={() => {
               setEmojiOpen(false);
               setMention(null);
@@ -905,37 +956,7 @@ export function MessageComposer({
         </div>
       )}
       {emojiOpen && (
-              <div
-                ref={emojiPopoverRef}
-                role="dialog"
-                aria-label="Pick an emoji"
-                className="popover-in absolute bottom-[calc(100%+10px)] left-3 z-40 max-h-[min(320px,60vh)] w-[264px] overflow-y-auto rounded-[18px] border border-line/70 bg-paper shadow-[var(--kora-shadow-popover)]"
-              >
-                <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
-                  <span className="text-[10px] font-semibold tracking-[0.1em] text-faint uppercase">
-                    Emoji
-                  </span>
-                  <span className="text-[10px] text-faint">Click to insert</span>
-                </div>
-                {recentEmojis.length > 0 && (
-                  <div className="px-1.5 pb-1">
-                    <p className="px-1.5 pb-0.5 text-[9px] font-medium text-faint">Recent</p>
-                    <div className="grid grid-cols-6">
-                      {recentEmojis.map((emoji) => (
-                        <EmojiButton key={`recent-${emoji}`} emoji={emoji} onPick={insertEmoji} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="px-1.5 pb-2">
-                  <p className="px-1.5 pb-0.5 text-[9px] font-medium text-faint">All</p>
-                  <div className="grid grid-cols-6">
-                    {EMOJIS.map((emoji) => (
-                      <EmojiButton key={emoji} emoji={emoji} onPick={insertEmoji} />
-                    ))}
-                  </div>
-                </div>
-              </div>
+        <EmojiPopover anchor={emojiButtonRef} align="start" onClose={() => setEmojiOpen(false)} onPick={insertEmoji} />
             )}
     </div>
   );
@@ -1051,18 +1072,6 @@ function DraftCard({
         </>
       )}
     </div>
-  );
-}
-
-function EmojiButton({ emoji, onPick }: { emoji: string; onPick: (emoji: string) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(emoji)}
-      className="grid size-10 place-items-center rounded-[10px] text-[19px] leading-none transition-[background-color,transform] duration-100 ease-out hover:bg-line-soft active:scale-[0.94]"
-    >
-      {emoji}
-    </button>
   );
 }
 

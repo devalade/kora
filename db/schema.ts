@@ -46,6 +46,21 @@ export const loginAttempts = sqliteTable(
   (table) => [index('login_attempts_window_idx').on(table.windowStart)],
 );
 
+// One-time password reset links. Only the SHA-256 of the emailed token is stored.
+export const passwordResets = sqliteTable(
+  'password_resets',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: text('expires_at').notNull(),
+    usedAt: text('used_at'),
+    createdAt: text('created_at').notNull().default(nowIso),
+  },
+  (table) => [index('password_resets_user_idx').on(table.userId)],
+);
+
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -111,6 +126,8 @@ export const channelMembers = sqliteTable(
     typingAt: text('typing_at'),
     // Set while the member types a thread reply; null means they are typing in the channel.
     typingThreadId: text('typing_thread_id'),
+    // Set while the member has muted the channel: no unread badge, tab count or notifications.
+    mutedAt: text('muted_at'),
     joinedAt: text('joined_at').notNull().default(nowIso),
   },
   (table) => [

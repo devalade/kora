@@ -53,6 +53,7 @@ import type {
   PullRequestLink,
 } from './types';
 import type { PullRequestState } from './github-links';
+import { throttleWrite } from './rate-limit';
 
 const PRIORITIES = [0, 1, 2, 3, 4] as const;
 const PRIORITY_NAMES = ['No priority', 'Urgent', 'High', 'Medium', 'Low'];
@@ -1015,6 +1016,7 @@ export const createIssueFn = createServerFn({ method: 'POST' })
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const { workspace, statuses } = await workspaceForSlug(data.slug, me.id);
+    await throttleWrite('issue', me.id);
     let teamId = data.teamId;
     if (data.parentIssueId) {
       const [parent] = await db
@@ -1359,6 +1361,7 @@ export const addTaskCommentFn = createServerFn({ method: 'POST' })
     const me = await readSessionUser();
     if (!me) throw new Error('Sign in required.');
     const issue = await requireIssue(data.issueId, me.id);
+    await throttleWrite('comment', me.id);
     const commentId = newId();
     await db.insert(issueComments).values({
       id: commentId,
